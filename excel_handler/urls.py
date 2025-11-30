@@ -9,4 +9,5 @@ urlpatterns = [
     path('process-all/', views.process_all_workflows, name='process_all_workflows'),
     path('workflow4/', views.workflow4_view, name='workflow4'),
     path('chart-data/<int:file_id>/', views.get_chart_data, name='get_chart_data'),
+    path('strict-extract/<int:file_id>/', views.strict_extract_excel, name='strict_extract_excel'),
 ]

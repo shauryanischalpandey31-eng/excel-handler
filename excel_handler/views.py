@@ -36,6 +36,10 @@ from .chart_data_builder import (
     extract_real_data_from_excel,
     build_chart_data_from_workflow4,
 )
+from .strict_excel_extractor import (
+    extract_strict_excel_data,
+    validate_excel_structure,
+)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -843,3 +847,34 @@ def get_chart_data(request, file_id):
     except Exception as exc:
         logger.error("Error in get_chart_data: %s", str(exc), exc_info=True)
         return JsonResponse({'error': f'An error occurred: {str(exc)}'}, status=500)
+
+
+def strict_extract_excel(request, file_id):
+    """
+    STRICT Excel extraction endpoint.
+    Returns EXACT values from Excel with NO assumptions.
+    Returns JSON in the format specified by the strict extraction requirements.
+    """
+    try:
+        uploaded_file_obj = UploadedExcelFile.objects.get(id=file_id)
+        file_path = uploaded_file_obj.file.path
+        
+        # Use strict extractor
+        result = extract_strict_excel_data(file_path)
+        
+        # Return JSON response
+        return JsonResponse(result, json_dumps_params={'ensure_ascii': False})
+        
+    except UploadedExcelFile.DoesNotExist:
+        return JsonResponse({
+            'error': True,
+            'message': 'File not found',
+            'missing_items': ['file_id']
+        }, status=404)
+    except Exception as exc:
+        logger.error("Error in strict_extract_excel: %s", str(exc), exc_info=True)
+        return JsonResponse({
+            'error': True,
+            'message': f'Error processing Excel file: {str(exc)}',
+            'missing_items': []
+        }, status=500)
