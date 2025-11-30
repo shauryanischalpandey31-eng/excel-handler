@@ -40,9 +40,10 @@ from .strict_excel_extractor import (
     extract_strict_excel_data,
     validate_excel_structure,
 )
-from .comprehensive_extractor import extract_all_sheets_data
-from .universal_extractor import UniversalDataExtractor
-from .chart_data_builder import ChartDataBuilder
+# Lazy imports to prevent startup crashes
+# from .comprehensive_extractor import extract_all_sheets_data
+# from .universal_extractor import UniversalDataExtractor
+# from .chart_data_builder import ChartDataBuilder
 import logging
 
 logger = logging.getLogger(__name__)
@@ -177,6 +178,10 @@ def index(request):
     
     if uploaded_file:
         try:
+            # Lazy import to prevent startup crashes
+            from .universal_extractor import UniversalDataExtractor
+            from .chart_data_builder import ChartDataBuilder
+            
             file_path = uploaded_file.file.path
             if file_path and os.path.exists(file_path):
                 logger.info(f"Extracting data using Universal Extractor from: {file_path}")
@@ -869,6 +874,10 @@ def strict_extract_excel(request, file_id):
     Uses Universal Extractor to get clean data with pure float values.
     """
     try:
+        # Lazy import to prevent startup crashes
+        from .universal_extractor import UniversalDataExtractor
+        from .chart_data_builder import ChartDataBuilder
+        
         uploaded_file_obj = UploadedExcelFile.objects.get(id=file_id)
         file_path = uploaded_file_obj.file.path
         
