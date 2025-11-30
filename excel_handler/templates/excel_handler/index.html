@@ -810,25 +810,59 @@
             if (tableBody) {
                 tableBody.innerHTML = ''; // Clear existing rows
                 
-                firstProduct.historical.forEach(item => {
-                    const row = document.createElement('tr');
-                    row.innerHTML = `
-                        <td><strong>${item.month}</strong></td>
-                        <td>${item.value.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-                        <td>-</td>
-                    `;
-                    tableBody.appendChild(row);
-                });
+                // Add historical rows
+                if (Array.isArray(firstProduct.historical)) {
+                    firstProduct.historical.forEach(item => {
+                        const histValue = item && item.value !== null && item.value !== undefined
+                            ? item.value.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+                            : '-';
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td><strong>${item.month || '-'}</strong></td>
+                            <td>${histValue}</td>
+                            <td>-</td>
+                        `;
+                        tableBody.appendChild(row);
+                    });
+                }
                 
-                firstProduct.predicted.forEach(item => {
-                    const row = document.createElement('tr');
-                    row.innerHTML = `
-                        <td><strong>${item.month}</strong></td>
-                        <td>-</td>
-                        <td><span class="text-danger fw-bold">${item.value.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></td>
-                    `;
-                    tableBody.appendChild(row);
-                });
+                // Add predicted rows - handle both array and object formats
+                if (Array.isArray(firstProduct.predicted)) {
+                    // Array format: [{month: "April", value: 1762522.027}, ...]
+                    firstProduct.predicted.forEach(item => {
+                        const predValue = item && item.value !== null && item.value !== undefined
+                            ? item.value.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+                            : '-';
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td><strong>${item.month || '-'}</strong></td>
+                            <td>-</td>
+                            <td><span class="text-danger fw-bold">${predValue}</span></td>
+                        `;
+                        tableBody.appendChild(row);
+                    });
+                } else if (typeof firstProduct.predicted === 'object' && firstProduct.predicted !== null) {
+                    // Object format: {"April": {"value": 1762522.027}, "May": {"value": 1800000}, ...}
+                    const predictedMonths = Object.keys(firstProduct.predicted).sort((a, b) => {
+                        const monthOrder = ['January', 'February', 'March', 'April', 'May', 'June', 
+                                          'July', 'August', 'September', 'October', 'November', 'December'];
+                        return monthOrder.indexOf(a) - monthOrder.indexOf(b);
+                    });
+                    
+                    predictedMonths.forEach(month => {
+                        const predData = firstProduct.predicted[month];
+                        const predValue = predData && predData.value !== null && predData.value !== undefined
+                            ? predData.value.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+                            : '-';
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td><strong>${month || '-'}</strong></td>
+                            <td>-</td>
+                            <td><span class="text-danger fw-bold">${predValue}</span></td>
+                        `;
+                        tableBody.appendChild(row);
+                    });
+                }
             }
         }
         
@@ -953,24 +987,57 @@
                 // Add historical rows
                 for (let i = 0; i < months.length; i++) {
                     const row = document.createElement('tr');
+                    const histValue = historical[i] !== null && historical[i] !== undefined 
+                        ? historical[i].toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+                        : '-';
                     row.innerHTML = `
-                        <td><strong>${months[i]}</strong></td>
-                        <td>${historical[i].toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                        <td><strong>${months[i] || '-'}</strong></td>
+                        <td>${histValue}</td>
                         <td>-</td>
                     `;
                     tableBody.appendChild(row);
                 }
                 
                 // Add predicted rows
-                for (let i = 0; i < predicted.length; i++) {
-                    const predMonth = fiscalMonths[(lastMonthIdx + i + 1) % 12];
-                    const row = document.createElement('tr');
-                    row.innerHTML = `
-                        <td><strong>${predMonth}</strong></td>
-                        <td>-</td>
-                        <td><span class="text-danger fw-bold">${predicted[i].toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></td>
-                    `;
-                    tableBody.appendChild(row);
+                // Handle both array format and object format for predicted data
+                if (Array.isArray(predicted)) {
+                    // Array format: [value1, value2, ...]
+                    for (let i = 0; i < predicted.length; i++) {
+                        const predMonth = fiscalMonths[(lastMonthIdx + i + 1) % 12];
+                        const predValue = predicted[i] !== null && predicted[i] !== undefined
+                            ? (typeof predicted[i] === 'object' && predicted[i].value !== undefined
+                                ? predicted[i].value.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+                                : predicted[i].toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}))
+                            : '-';
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td><strong>${predMonth}</strong></td>
+                            <td>-</td>
+                            <td><span class="text-danger fw-bold">${predValue}</span></td>
+                        `;
+                        tableBody.appendChild(row);
+                    }
+                } else if (typeof predicted === 'object' && predicted !== null) {
+                    // Object format: {"April": {"value": 1762522.027}, "May": {"value": 1800000}, ...}
+                    const predictedMonths = Object.keys(predicted).sort((a, b) => {
+                        const monthOrder = ['January', 'February', 'March', 'April', 'May', 'June', 
+                                          'July', 'August', 'September', 'October', 'November', 'December'];
+                        return monthOrder.indexOf(a) - monthOrder.indexOf(b);
+                    });
+                    
+                    for (const month of predictedMonths) {
+                        const predData = predicted[month];
+                        const predValue = predData && predData.value !== null && predData.value !== undefined
+                            ? predData.value.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+                            : '-';
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td><strong>${month || '-'}</strong></td>
+                            <td>-</td>
+                            <td><span class="text-danger fw-bold">${predValue}</span></td>
+                        `;
+                        tableBody.appendChild(row);
+                    }
                 }
             }
             
