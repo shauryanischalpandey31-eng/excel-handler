@@ -1091,10 +1091,26 @@
                 colDiv.appendChild(cardDiv);
                 container.appendChild(colDiv);
                 
-                // Prepare data
+                // Prepare data with safeguards - ensure all values are numbers
                 const months = ingData.months || [];
-                const historical = ingData.historical || [];
-                const predicted = ingData.predicted || [];
+                const historical = (ingData.historical || []).map(v => {
+                    if (v === null || v === undefined || v === '') return null;
+                    if (typeof v === 'object' && v !== null && v.value !== undefined) {
+                        const num = parseFloat(v.value);
+                        return isNaN(num) ? null : num;
+                    }
+                    const num = parseFloat(v);
+                    return isNaN(num) ? null : num;
+                });
+                const predicted = (ingData.predicted || []).map(v => {
+                    if (v === null || v === undefined || v === '') return null;
+                    if (typeof v === 'object' && v !== null && v.value !== undefined) {
+                        const num = parseFloat(v.value);
+                        return isNaN(num) ? null : num;
+                    }
+                    const num = parseFloat(v);
+                    return isNaN(num) ? null : num;
+                });
                 
                 const allMonths = [...months];
                 const historicalValues = [...historical];
