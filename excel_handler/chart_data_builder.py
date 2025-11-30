@@ -4,7 +4,8 @@ Converts extracted data to chart-friendly arrays.
 Ensures all values are pure floats, no nested objects.
 """
 import logging
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Tuple, Optional
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -184,3 +185,133 @@ class ChartDataBuilder:
         context['chart_data_json'] = json.dumps(chart_data_for_js)
         
         return context
+
+
+# Legacy functions for backward compatibility
+def extract_real_data_from_excel(
+    ingredient_list: List[Tuple[str, List[Dict]]],
+    annual_data: List[Dict]
+) -> Dict:
+    """
+    Legacy function for backward compatibility.
+    Extracts data from ingredient_list and annual_data.
+    """
+    from .excel_extractor import (
+        extract_from_ingredient_section,
+        FISCAL_MONTHS,
+        normalize_numeric_value,
+    )
+    
+    result = {
+        'overall': {'months': [], 'historical': [], 'predicted': []},
+        'ingredients': {}
+    }
+    
+    # Extract overall monthly totals from annual data
+    overall_monthly_values = {}
+    
+    # Extract from annual data (columns D-O)
+    for month_idx, month_name in enumerate(FISCAL_MONTHS):
+        col = chr(65 + 3 + month_idx)  # D=3, E=4, ..., O=14
+        month_values = []
+        
+        for row in annual_data:
+            if row.get('set_type') in ['previous', 'current']:
+                value = row.get(col, "")
+                num_value = normalize_numeric_value(value)
+                if num_value is not None and num_value != 0:
+                    month_values.append(num_value)
+        
+        if month_values:
+            total = sum(month_values)
+            if total is not None and not np.isnan(total) and total > 0:
+                overall_monthly_values[month_name] = float(total)
+    
+    # Generate overall forecast
+    if overall_monthly_values:
+        overall_months = []
+        overall_historical = []
+        for month_name in FISCAL_MONTHS:
+            if month_name in overall_monthly_values:
+                overall_months.append(month_name)
+                overall_historical.append(overall_monthly_values[month_name])
+        
+        if len(overall_historical) >= 3:
+            forecast_value = float(np.mean(overall_historical[-3:]))
+        elif len(overall_historical) >= 2:
+            forecast_value = float(np.mean(overall_historical))
+        elif len(overall_historical) >= 1:
+            forecast_value = float(overall_historical[-1])
+        else:
+            forecast_value = 0.0
+        
+        overall_predicted = [forecast_value] * 6
+        
+        result['overall'] = {
+            'months': overall_months,
+            'historical': overall_historical,
+            'predicted': overall_predicted
+        }
+    
+    # Extract ingredient data
+    for ing_name, rows in ingredient_list:
+        if not rows:
+            continue
+        
+        monthly_series = extract_from_ingredient_section(rows, ing_name.upper())
+        
+        if not monthly_series:
+            continue
+        
+        ing_months = []
+        ing_historical = []
+        
+        for month_name in FISCAL_MONTHS:
+            if month_name in monthly_series:
+                value = monthly_series[month_name]
+                if value is not None and not np.isnan(value) and value > 0:
+                    ing_months.append(month_name)
+                    ing_historical.append(float(value))
+        
+        # Generate forecast
+        if len(ing_historical) >= 3:
+            forecast_value = float(np.mean(ing_historical[-3:]))
+        elif len(ing_historical) >= 2:
+            forecast_value = float(np.mean(ing_historical))
+        elif len(ing_historical) >= 1:
+            forecast_value = float(ing_historical[-1])
+        else:
+            forecast_value = 0.0
+        
+        ing_predicted = [forecast_value] * 6
+        
+        result['ingredients'][ing_name.upper()] = {
+            'months': ing_months,
+            'historical': ing_historical,
+            'predicted': ing_predicted
+        }
+    
+    return result
+
+
+def build_chart_data_from_workflow4(
+    result,
+    ingredient_list: List[Tuple[str, List[Dict]]],
+    annual_data: List[Dict]
+) -> Dict:
+    """
+    Legacy function for backward compatibility.
+    Builds chart data from workflow4 results.
+    """
+    chart_data = {
+        'overall': {'months': [], 'historical': [], 'predicted': []},
+        'ingredients': {}
+    }
+    
+    # Use extract_real_data_from_excel for consistency
+    extracted = extract_real_data_from_excel(ingredient_list, annual_data)
+    
+    chart_data['overall'] = extracted.get('overall', {'months': [], 'historical': [], 'predicted': []})
+    chart_data['ingredients'] = extracted.get('ingredients', {})
+    
+    return chart_data
