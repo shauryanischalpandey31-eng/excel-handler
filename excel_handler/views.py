@@ -211,6 +211,42 @@ def index(request):
             else:
                 logger.warning(f"File path does not exist: {file_path if uploaded_file else 'None'}")
                 
+        except ImportError as ie:
+            logger.warning("Universal Extractor import failed, using fallback: %s", str(ie))
+            # Fallback to old extraction method
+            try:
+                if annual_data or ingredient_list:
+                    extracted_data = extract_real_data_from_excel(ingredient_list, annual_data)
+                    overall_data = extracted_data.get('overall', {})
+                    if overall_data:
+                        overall_months = overall_data.get('months', [])
+                        overall_historical = overall_data.get('historical', [])
+                        overall_predicted = overall_data.get('predicted', [])
+                    
+                    ingredients_data = extracted_data.get('ingredients', {})
+                    if ingredients_data:
+                        for ing_name, ing_data in ingredients_data.items():
+                            if ing_data and isinstance(ing_data, dict):
+                                ingredient_chart_data[ing_name] = {
+                                    'months': ing_data.get('months', []),
+                                    'historical': ing_data.get('historical', []),
+                                    'predicted': ing_data.get('predicted', [])
+                                }
+                        all_products_list = list(ingredients_data.keys())
+                        ingredients_json = json.dumps(all_products_list)
+                    
+                    chart_data_for_template = {
+                        'overall': {
+                            'months': overall_months,
+                            'historical': overall_historical,
+                            'predicted': overall_predicted
+                        },
+                        'ingredients': ingredient_chart_data,
+                        'ingredients_list': all_products_list
+                    }
+                    chart_data_json = json.dumps(chart_data_for_template)
+            except Exception as e2:
+                logger.error("Fallback extraction failed: %s", str(e2))
         except Exception as e:
             logger.error("Error extracting data with Universal Extractor: %s", str(e), exc_info=True)
             # Fallback to empty data - don't crash
