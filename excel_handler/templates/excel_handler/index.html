@@ -984,11 +984,24 @@
             if (tableBody) {
                 tableBody.innerHTML = '';
                 
+                // Ensure all values are numbers (convert to float if needed)
+                const cleanHistorical = historical.map(v => {
+                    if (v === null || v === undefined) return null;
+                    if (typeof v === 'object' && v.value !== undefined) return parseFloat(v.value);
+                    return parseFloat(v);
+                });
+                
+                const cleanPredicted = predicted.map(v => {
+                    if (v === null || v === undefined) return null;
+                    if (typeof v === 'object' && v.value !== undefined) return parseFloat(v.value);
+                    return parseFloat(v);
+                });
+                
                 // Add historical rows
                 for (let i = 0; i < months.length; i++) {
                     const row = document.createElement('tr');
-                    const histValue = historical[i] !== null && historical[i] !== undefined 
-                        ? historical[i].toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+                    const histValue = cleanHistorical[i] !== null && !isNaN(cleanHistorical[i])
+                        ? cleanHistorical[i].toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
                         : '-';
                     row.innerHTML = `
                         <td><strong>${months[i] || '-'}</strong></td>
@@ -998,46 +1011,19 @@
                     tableBody.appendChild(row);
                 }
                 
-                // Add predicted rows
-                // Handle both array format and object format for predicted data
-                if (Array.isArray(predicted)) {
-                    // Array format: [value1, value2, ...]
-                    for (let i = 0; i < predicted.length; i++) {
-                        const predMonth = fiscalMonths[(lastMonthIdx + i + 1) % 12];
-                        const predValue = predicted[i] !== null && predicted[i] !== undefined
-                            ? (typeof predicted[i] === 'object' && predicted[i].value !== undefined
-                                ? predicted[i].value.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
-                                : predicted[i].toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}))
-                            : '-';
-                        const row = document.createElement('tr');
-                        row.innerHTML = `
-                            <td><strong>${predMonth}</strong></td>
-                            <td>-</td>
-                            <td><span class="text-danger fw-bold">${predValue}</span></td>
-                        `;
-                        tableBody.appendChild(row);
-                    }
-                } else if (typeof predicted === 'object' && predicted !== null) {
-                    // Object format: {"April": {"value": 1762522.027}, "May": {"value": 1800000}, ...}
-                    const predictedMonths = Object.keys(predicted).sort((a, b) => {
-                        const monthOrder = ['January', 'February', 'March', 'April', 'May', 'June', 
-                                          'July', 'August', 'September', 'October', 'November', 'December'];
-                        return monthOrder.indexOf(a) - monthOrder.indexOf(b);
-                    });
-                    
-                    for (const month of predictedMonths) {
-                        const predData = predicted[month];
-                        const predValue = predData && predData.value !== null && predData.value !== undefined
-                            ? predData.value.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
-                            : '-';
-                        const row = document.createElement('tr');
-                        row.innerHTML = `
-                            <td><strong>${month || '-'}</strong></td>
-                            <td>-</td>
-                            <td><span class="text-danger fw-bold">${predValue}</span></td>
-                        `;
-                        tableBody.appendChild(row);
-                    }
+                // Add predicted rows (predicted is always an array of numbers now)
+                for (let i = 0; i < cleanPredicted.length; i++) {
+                    const predMonth = fiscalMonths[(lastMonthIdx + i + 1) % 12];
+                    const predValue = cleanPredicted[i] !== null && !isNaN(cleanPredicted[i])
+                        ? cleanPredicted[i].toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+                        : '-';
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td><strong>${predMonth}</strong></td>
+                        <td>-</td>
+                        <td><span class="text-danger fw-bold">${predValue}</span></td>
+                    `;
+                    tableBody.appendChild(row);
                 }
             }
             
