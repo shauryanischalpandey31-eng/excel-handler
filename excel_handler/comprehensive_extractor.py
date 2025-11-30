@@ -8,8 +8,9 @@ import numpy as np
 import logging
 from typing import Dict, List, Optional, Any, Tuple
 from collections import OrderedDict
-import openpyxl
-from openpyxl import load_workbook
+# openpyxl imported only when needed to prevent startup issues
+# import openpyxl
+# from openpyxl import load_workbook
 
 logger = logging.getLogger(__name__)
 
