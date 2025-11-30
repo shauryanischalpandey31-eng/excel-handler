@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Excel Upload</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <header class="bg-primary text-white py-3">
+        <div class="container">
+            <h1>Excel Processor Dashboard</h1>
+        </div>
+    </header>
+    <div class="container mt-5">
+        <h1>Upload Excel File</h1>
+        <div class="row g-3 align-items-end">
+            <div class="col">
+                <form method="post" enctype="multipart/form-data" id="excel_form">
+                    {% csrf_token %}
+                    <label for="excel_file" class="form-label">Select Excel File</label>
+                    <input type="file" class="form-control" id="excel_file" name="excel_file" accept=".xlsx">
+                </form>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-primary" form="excel_form">Upload</button>
+            </div>
+            <div class="col-auto">
+                <a href="/media/samples/sample.xlsx" class="btn btn-secondary" download>Download Sample File</a>
+            </div>
+        </div>
+
+        {% if error_message %}
+        <div class="alert alert-danger mt-4" role="alert">
+            <strong>Error:</strong> {{ error_message }}
+        </div>
+        {% endif %}
+        
+        {% if warning_message %}
+        <div class="alert alert-warning mt-4" role="alert">
+            <strong>Warning:</strong> {{ warning_message }}
+        </div>
+        {% endif %}
+        
+        {% if data %}
+        <div class="alert alert-info mt-4" role="alert">
+            <strong>Following blocks of useful information were detected in the Excel file you uploaded.</strong> Check if the respective data seems correct. Else, download the sample file and upload the data correctly in the correct format.
+        </div>
+        {% endif %}
+
+         {% if uploaded_file %}
+         <div class="mt-3 d-flex gap-2">
+             <a href="{{ uploaded_file.file.url }}" class="btn btn-outline-primary" download>Download Uploaded File</a>
+             {% if warning_message %}
+             <button class="btn btn-success btn-lg" onclick="alert('Please ensure your Excel file matches the expected format. Download the sample file to see the correct structure.');" title="File structure does not match expected format">Process</button>
+             {% else %}
+             <button class="btn btn-success btn-lg" onclick="confirmProcess()">Process</button>
+             {% endif %}
+             <div id="downloadFinalDiv" style="display:none;" class="ms-2">
+                 <a id="downloadFinalBtn" href="#" class="btn btn-primary btn-lg" download>Download Final Processed File</a>
+             </div>
+         </div>
+         <div id="processingStatus" class="mt-3 alert alert-info" style="display:none;">
+             <div class="spinner-border spinner-border-sm me-2" role="status">
+                 <span class="visually-hidden">Processing...</span>
+             </div>
+             Processing all workflows including forecasting. Please wait...
+         </div>
+         <div id="processingError" class="mt-3 alert alert-danger" style="display:none;"></div>
+         <div id="processingSuccess" class="mt-3 alert alert-success" style="display:none;"></div>
+         <div id="processMessage" class="mt-2 alert alert-info" style="display:none;">
+             By clicking on this button, I confirm that I have reviewed the detected data of useful information. I confirm that the colored rows of the individual data blocks are consistent.
+             <div class="mt-3">
+                 <button id="firstNextBtn" class="btn btn-success" onclick="showMonthSelection()">Next</button>
+             </div>
+         </div>
+         <div id="monthSelection" class="mt-2" style="display:none;">
+             <div class="d-flex align-items-end" id="monthSelectRow">
+                 <label for="monthSelect" class="form-label me-2">Select Current Month:</label>
+                 <select id="monthSelect" class="form-select me-2" style="width: 200px;">
+                     <option value="January">January</option>
+                     <option value="February">February</option>
+                     <option value="March">March</option>
+                     <option value="April">April</option>
+                     <option value="May">May</option>
+                     <option value="June">June</option>
+                     <option value="July">July</option>
+                     <option value="August">August</option>
+                     <option value="September">September</option>
+                     <option value="October">October</option>
+                     <option value="November">November</option>
+                     <option value="December">December</option>
+                 </select>
+                 <button class="btn btn-success" onclick="alertSelectedMonth()">Next</button>
+             </div>
+             <div id="confirmationMessage" class="mt-3" style="display:none;">
+                 <p>Please confirm that correct month data is being picked up by looking at the individual data.</p>
+                 <button class="btn btn-success" onclick="finalNext()">Next</button>
+             </div>
+             <div id="inventoryInfo" class="mt-3 alert alert-info" style="display:none;"></div>
+             <div id="ingredientData" class="mt-3" style="display:none;">
+                 <table class="table table-striped">
+                     <thead>
+                         <tr>
+                             <th>Ingredient Code</th>
+                             <th>Minimum Production Quantity</th>
+                             <th>Number of Drums</th>
+                         </tr>
+                     </thead>
+                     <tbody>
+                         {% for ing, data in ingredient_list %}
+                         <tr>
+                             <td>{{ ing|upper }}</td>
+                             <td id="minProd_{{ ing }}"></td>
+                             <td id="numDrums_{{ ing }}"></td>
+                         </tr>
+                         {% endfor %}
+                     </tbody>
+                 </table>
+                 <div class="mt-3">
+                     <button class="btn btn-success" onclick="processData()">Next</button>
+                     <button id="recalcBtn" class="btn btn-success mt-2" onclick="adjustValues()" style="display:none;">Adjust Values</button>
+                 </div>
+             </div>
+         </div>
+         {% endif %}
+
+        {% if annual_data %}
+        <div class="accordion mt-5" id="annualDataAccordion">
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseAnnualData" aria-expanded="false" aria-controls="collapseAnnualData">
+                        Detected Annual Data
+                    </button>
+                </h2>
+                <div id="collapseAnnualData" class="accordion-collapse collapse" data-bs-parent="#annualDataAccordion">
+                    <div class="accordion-body">
+                        <div class="table-responsive">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        {% for key in annual_data.0.keys %}
+                                        <th>{{ key }}</th>
+                                        {% endfor %}
+                                    </tr>
+                                </thead>
+                                 <tbody>
+                                     {% for row in annual_data %}
+                                     <tr class="{% if row.set_type == 'previous' %}table-light{% elif row.set_type == 'current' %}table-success{% endif %}">
+                                         {% for key, value in row.items %}
+                                         {% if key != 'set_type' %}
+                                         <td>{{ value }}</td>
+                                         {% endif %}
+                                         {% endfor %}
+                                     </tr>
+                                     {% endfor %}
+                                 </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+        {% for ing, data in ingredient_list %}
+        {% if data %}
+        <div class="accordion mt-3" id="ingredientAccordion{{ forloop.counter }}">
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseIngredient{{ forloop.counter }}" aria-expanded="false" aria-controls="collapseIngredient{{ forloop.counter }}">
+                        Ingredient {{ ing|upper }}
+                    </button>
+                </h2>
+                <div id="collapseIngredient{{ forloop.counter }}" class="accordion-collapse collapse" data-bs-parent="#ingredientAccordion{{ forloop.counter }}">
+                    <div class="accordion-body">
+                        <div class="table-responsive">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        {% for key in data.0.keys %}
+                                        <th>{{ key }}</th>
+                                        {% endfor %}
+                                    </tr>
+                                </thead>
+                                 <tbody>
+                                     {% for row in data %}
+                                     <tr class="{% if row.set_type == 'previous' %}table-light{% elif row.set_type == 'current' %}table-success{% endif %}">
+                                         {% for key, value in row.items %}
+                                         {% if key != 'set_type' %}
+                                         <td>{{ value }}</td>
+                                         {% endif %}
+                                         {% endfor %}
+                                     </tr>
+                                     {% endfor %}
+                                 </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+        {% endfor %}
+
+        {% if data %}
+        <div class="accordion mt-5" id="processedDataAccordion">
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseProcessedData" aria-expanded="false" aria-controls="collapseProcessedData">
+                        Click here to see parsed data.
+                    </button>
+                </h2>
+                <div id="collapseProcessedData" class="accordion-collapse collapse" data-bs-parent="#processedDataAccordion">
+                    <div class="accordion-body">
+                        <div class="table-responsive">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        {% for key in data.0.keys %}
+                                        <th>{{ key }}</th>
+                                        {% endfor %}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for row in data %}
+                                    <tr>
+                                        {% for key, value in row.items %}
+                                        <td>{{ value }}</td>
+                                        {% endfor %}
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+        
+        {% if chart_data_json or ingredient_charts_json %}
+        <div class="mt-5">
+            <h2 class="mb-4">Monthly Trends & Predictions</h2>
+            
+            {% if chart_data_json %}
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Overall Monthly Forecast</h5>
+                </div>
+                <div class="card-body">
+                    <canvas id="monthlyForecastChart" height="100"></canvas>
+                    <div class="mt-3">
+                        <table class="table table-sm table-bordered">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Month</th>
+                                    <th>Historical Value</th>
+                                    <th>Predicted Value</th>
+                                </tr>
+                            </thead>
+                            <tbody id="monthlyValuesTableBody">
+                                <!-- Table will be populated by JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if ingredient_charts_json %}
+            <div class="card mb-4">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0">Ingredient-wise Monthly Trends</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        {% for ing_name, ing_chart_json in ingredient_charts_json.items %}
+                        <div class="col-md-6 mb-4">
+                            <h6 class="text-center">{{ ing_name }}</h6>
+                            <canvas id="ingredientChart_{{ ing_name }}" height="150"></canvas>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const ingredients = [{% for ing, data in ingredient_list %}'{{ ing }}',{% endfor %}];
+        function confirmProcess() {
+            document.getElementById('processMessage').style.display = 'block';
+        }
+        function showMonthSelection() {
+            document.getElementById('processMessage').style.display = 'none';
+            document.getElementById('monthSelection').style.display = 'block';
+        }
+        function alertSelectedMonth() {
+            const selectedMonth = document.getElementById('monthSelect').value;
+            const fiscalMonths = ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'];
+            const columns = ['D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O'];
+            const index = fiscalMonths.indexOf(selectedMonth);
+            if (index !== -1) {
+                const column = columns[index];
+                // Highlight the corresponding column in all tables
+                const tables = document.querySelectorAll('table');
+                tables.forEach(table => {
+                    const headers = table.querySelectorAll('th');
+                    let colIndex = -1;
+                    headers.forEach((th, i) => {
+                        if (th.textContent.trim() === column) {
+                            colIndex = i;
+                            th.classList.add('table-warning');
+                        }
+                    });
+                    if (colIndex !== -1) {
+                        const rows = table.querySelectorAll('tbody tr');
+                        rows.forEach(row => {
+                            const cells = row.querySelectorAll('td');
+                            if (cells[colIndex]) {
+                                cells[colIndex].classList.add('table-warning');
+                            }
+                        });
+                    }
+                });
+                // Disable the select and button
+                document.getElementById('monthSelect').disabled = true;
+                document.getElementById('monthSelection').querySelector('button').disabled = true;
+                // Hide the selection row and show confirmation
+                document.getElementById('monthSelectRow').style.display = 'none';
+                document.getElementById('confirmationMessage').style.display = 'block';
+            } else {
+                alert('Month not found');
+            }
+        }
+        function finalNext() {
+            // Hide confirmation
+            document.getElementById('confirmationMessage').style.display = 'none';
+            // Calculate ending inventory of previous month
+            const annualTable = document.querySelector('#annualDataAccordion table');
+            if (annualTable) {
+                const headers = annualTable.querySelectorAll('th');
+                let highlightedIndex = -1;
+                headers.forEach((th, i) => {
+                    if (th.classList.contains('table-warning')) {
+                        highlightedIndex = i;
+                    }
+                });
+                if (highlightedIndex > 0) {
+                    const precedingIndex = highlightedIndex - 1;
+                    const rows = annualTable.querySelectorAll('tbody tr');
+                    if (rows.length > 0) {
+                        const lastRow = rows[rows.length - 1];
+                        const cells = lastRow.querySelectorAll('td');
+                        if (cells[precedingIndex]) {
+                            const value = cells[precedingIndex].textContent.trim();
+                            document.getElementById('inventoryInfo').innerHTML = 'Ending inventory of previous month: ' + value;
+                            document.getElementById('inventoryInfo').style.display = 'block';
+                        }
+                    }
+                }
+            }
+            // Display ingredient data
+            let hasData = false;
+            ingredients.forEach((ing, index) => {
+                const table = document.querySelector(`#ingredientAccordion${index + 1} table`);
+                const minProdElement = document.getElementById(`minProd_${ing}`);
+                const numDrumsElement = document.getElementById(`numDrums_${ing}`);
+                
+                if (table && minProdElement && numDrumsElement) {
+                    const currentRows = Array.from(table.querySelectorAll('tbody tr')).filter(row => row.classList.contains('table-success'));
+                    if (currentRows.length >= 8) {
+                        // 6th current row, column A (index 0)
+                        const minProdCell = currentRows[5].querySelectorAll('td')[0];
+                        const minProdValue = minProdCell ? minProdCell.textContent.trim() : '';
+                        if (minProdValue) {
+                            minProdElement.textContent = minProdValue;
+                            minProdCell.classList.add('table-danger');
+                            hasData = true;
+                        } else {
+                            minProdElement.textContent = 'N/A';
+                        }
+                        // 8th current row, column A
+                        const numDrumsCell = currentRows[7].querySelectorAll('td')[0];
+                        const numDrumsValue = numDrumsCell ? numDrumsCell.textContent.trim() : '';
+                        if (numDrumsValue) {
+                            numDrumsElement.textContent = numDrumsValue;
+                            numDrumsCell.classList.add('table-danger');
+                            hasData = true;
+                        } else {
+                            numDrumsElement.textContent = 'N/A';
+                        }
+                    } else {
+                        // Not enough rows, show N/A
+                        if (minProdElement) minProdElement.textContent = 'N/A';
+                        if (numDrumsElement) numDrumsElement.textContent = 'N/A';
+                    }
+                } else {
+                    // Table or elements not found, show N/A
+                    if (minProdElement) minProdElement.textContent = 'N/A';
+                    if (numDrumsElement) numDrumsElement.textContent = 'N/A';
+                }
+            });
+            
+            // Show ingredient data table even if empty
+            document.getElementById('ingredientData').style.display = 'block';
+            
+            // Show warning if no data found
+            if (!hasData) {
+                const warningDiv = document.createElement('div');
+                warningDiv.className = 'alert alert-warning mt-3';
+                warningDiv.textContent = 'No ingredient data found in the expected format. Please ensure your Excel file contains the required structure with ingredient sections.';
+                document.getElementById('ingredientData').appendChild(warningDiv);
+            }
+        }
+        function processData() {
+            let processedAny = false;
+            ingredients.forEach((ing, index) => {
+                const table = document.querySelector(`#ingredientAccordion${index + 1} table`);
+                if (table) {
+                    const currentRows = Array.from(table.querySelectorAll('tbody tr')).filter(row => row.classList.contains('table-success'));
+                    if (currentRows.length >= 7) {
+                        // Find highlighted column index
+                        const headers = table.querySelectorAll('th');
+                        let colIndex = -1;
+                        headers.forEach((th, i) => {
+                            if (th.classList.contains('table-warning')) {
+                                colIndex = i;
+                            }
+                        });
+                        if (colIndex !== -1 && colIndex < headers.length) {
+                            // 6th current row, highlighted column
+                            const sixthRow = currentRows[5];
+                            if (sixthRow) {
+                                const targetCell = sixthRow.querySelectorAll('td')[colIndex];
+                                if (targetCell) {
+                                    const targetValue = parseFloat(targetCell.textContent.trim()) || 0;
+                                    // Min prod qty: 6th row, column A (0)
+                                    const minProdCell = sixthRow.querySelectorAll('td')[0];
+                                    const minProdQty = parseFloat(minProdCell ? minProdCell.textContent.trim() : '1') || 1;
+                                    // Largest multiple < targetValue
+                                    const multiple = Math.floor(targetValue / minProdQty);
+                                    const newValue = multiple * minProdQty;
+                                    // 7th current row, same column
+                                    const seventhRow = currentRows[6];
+                                    if (seventhRow) {
+                                        const seventhCell = seventhRow.querySelectorAll('td')[colIndex];
+                                        if (seventhCell) {
+                                            seventhCell.textContent = newValue;
+                                            seventhCell.classList.add('table-danger');
+                                            processedAny = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // Hide the Next button and show Adjust Values only if we processed something
+            const nextButton = document.querySelector('#ingredientData button');
+            if (nextButton) {
+                nextButton.style.display = 'none';
+            }
+            if (processedAny) {
+                document.getElementById('recalcBtn').style.display = 'block';
+            } else {
+                // Show message if no data to process
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'alert alert-warning mt-3';
+                messageDiv.textContent = 'No data available to process. Please ensure your Excel file contains the required ingredient data structure.';
+                document.getElementById('ingredientData').appendChild(messageDiv);
+            }
+        }
+        function adjustValues() {
+            ingredients.forEach((ing, index) => {
+                const table = document.querySelector(`#ingredientAccordion${index + 1} table`);
+                if (table) {
+                    const currentRows = Array.from(table.querySelectorAll('tbody tr')).filter(row => row.classList.contains('table-success'));
+                    if (currentRows.length >= 8) {
+                        // Find highlighted column index
+                        const headers = table.querySelectorAll('th');
+                        let colIndex = -1;
+                        headers.forEach((th, i) => {
+                            if (th.classList.contains('table-warning')) {
+                                colIndex = i;
+                            }
+                        });
+                        if (colIndex !== -1) {
+                            // First, calculate for the selected month
+                            const sixthRow = currentRows[5];
+                            const minProdQty = parseFloat(sixthRow.querySelectorAll('td')[0].textContent.trim()) || 1;
+                            const sixthVal = parseFloat(sixthRow.querySelectorAll('td')[colIndex].textContent.trim()) || 0;
+                            const multiple7 = Math.floor(sixthVal / minProdQty);
+                            const val7 = multiple7 * minProdQty;
+                            currentRows[6].querySelectorAll('td')[colIndex].textContent = val7;
+                            currentRows[6].querySelectorAll('td')[colIndex].classList.add('table-danger');
+                            const val2 = parseFloat(currentRows[1].querySelectorAll('td')[colIndex].textContent.trim()) || 0;
+                            const result8 = val2 + val7 - sixthVal;
+                            currentRows[7].querySelectorAll('td')[colIndex].textContent = result8;
+                            currentRows[7].querySelectorAll('td')[colIndex].classList.add('table-danger');
+                            // Now, loop through subsequent months till column O (index 14)
+                            for (let nextCol = colIndex + 1; nextCol <= 14 && nextCol < headers.length; nextCol++) {
+                                // Copy 8th from previous to 2nd of this
+                                const prevEighthVal = currentRows[7].querySelectorAll('td')[nextCol - 1].textContent.trim();
+                                currentRows[1].querySelectorAll('td')[nextCol].textContent = prevEighthVal;
+                                currentRows[1].querySelectorAll('td')[nextCol].classList.add('table-danger');
+                                // Calculate 7th for this column
+                                const sixthValNext = parseFloat(currentRows[5].querySelectorAll('td')[nextCol].textContent.trim()) || 0;
+                                const multiple7Next = Math.floor(sixthValNext / minProdQty);
+                                const val7Next = multiple7Next * minProdQty;
+                                currentRows[6].querySelectorAll('td')[nextCol].textContent = val7Next;
+                                currentRows[6].querySelectorAll('td')[nextCol].classList.add('table-danger');
+                                // Calculate 8th
+                                const val2Next = parseFloat(currentRows[1].querySelectorAll('td')[nextCol].textContent.trim()) || 0;
+                                const result8Next = val2Next + val7Next - sixthValNext;
+                                currentRows[7].querySelectorAll('td')[nextCol].textContent = result8Next;
+                                currentRows[7].querySelectorAll('td')[nextCol].classList.add('table-danger');
+                            }
+                        }
+                    }
+                }
+            });
+            // Hide the Adjust Values button
+            document.getElementById('recalcBtn').style.display = 'none';
+            // Show completion message
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'alert alert-success mt-3';
+            messageDiv.textContent = 'Calculations have been done and values have been copied.';
+            document.querySelector('#ingredientData').appendChild(messageDiv);
+            // Add Adjust Number of Drum Values button
+            const buttonDiv = document.createElement('div');
+            buttonDiv.className = 'mt-3';
+            const adjustButton = document.createElement('button');
+            adjustButton.id = 'adjustDrumsBtn';
+            adjustButton.className = 'btn btn-success';
+            adjustButton.textContent = 'Adjust the Number of Drum Values for Each Ingredient';
+            adjustButton.onclick = adjustNumberOfDrums;
+            buttonDiv.appendChild(adjustButton);
+            document.querySelector('#ingredientData').appendChild(buttonDiv);
+        }
+        function adjustNumberOfDrums() {
+            ingredients.forEach((ing, index) => {
+                const table = document.querySelector(`#ingredientAccordion${index + 1} table`);
+                if (table) {
+                    const currentRows = Array.from(table.querySelectorAll('tbody tr')).filter(row => row.classList.contains('table-success'));
+                    if (currentRows.length >= 10) {
+                        const minProd = parseFloat(currentRows[5].querySelectorAll('td')[0].textContent.trim()) || 1;
+                        const numDrums = parseFloat(currentRows[7].querySelectorAll('td')[0].textContent.trim()) || 1;
+                        const ceiling = Math.ceil(minProd / numDrums);
+                        // Columns D to O (indices 3 to 14)
+                        for (let col = 3; col <= 14 && col < table.querySelectorAll('th').length; col++) {
+                            const val7 = parseFloat(currentRows[6].querySelectorAll('td')[col].textContent.trim()) || 0;
+                            let val10 = 0;
+                            if (val7 !== 0) {
+                                val10 = Math.round(val7 / ceiling);
+                            }
+                            currentRows[9].querySelectorAll('td')[col].textContent = val10;
+                            currentRows[9].querySelectorAll('td')[col].classList.add('table-danger');
+                        }
+                    }
+                }
+            });
+            // Hide the button
+            document.getElementById('adjustDrumsBtn').style.display = 'none';
+            // Show completion message
+            const drumMessageDiv = document.createElement('div');
+            drumMessageDiv.className = 'alert alert-success mt-3';
+            drumMessageDiv.textContent = 'Drum values have been calculated.';
+            document.querySelector('#ingredientData').appendChild(drumMessageDiv);
+            // Add Adjust Annual Data button
+            const annualButtonDiv = document.createElement('div');
+            annualButtonDiv.className = 'mt-3';
+            const annualButton = document.createElement('button');
+            annualButton.className = 'btn btn-success';
+            annualButton.textContent = 'Adjust Annual Data';
+            annualButton.onclick = adjustAnnualData;
+            annualButtonDiv.appendChild(annualButton);
+            document.querySelector('#ingredientData').appendChild(annualButtonDiv);
+        }
+        function adjustAnnualData() {
+            const annualTable = document.querySelector('#annualDataAccordion table');
+            if (annualTable) {
+                const annualCurrentRows = Array.from(annualTable.querySelectorAll('tbody tr')).filter(row => row.classList.contains('table-success'));
+                if (annualCurrentRows.length >= 3) {
+                    const headers = annualTable.querySelectorAll('th');
+                    let colIndex = -1;
+                    headers.forEach((th, i) => {
+                        if (th.classList.contains('table-warning')) {
+                            colIndex = i;
+                        }
+                    });
+                    if (colIndex !== -1) {
+                        // Sum row 10 values from all ingredients for the current month
+                        let totalRuns = 0;
+                        ingredients.forEach((ing, index) => {
+                            const table = document.querySelector(`#ingredientAccordion${index + 1} table`);
+                            if (table) {
+                                const currentRows = Array.from(table.querySelectorAll('tbody tr')).filter(row => row.classList.contains('table-success'));
+                                if (currentRows.length >= 10) {
+                                    const runs = parseFloat(currentRows[9].querySelectorAll('td')[colIndex].textContent.trim()) || 0;
+                                    totalRuns += runs;
+                                }
+                            }
+                        });
+                        // Set row 3 of annual data
+                        annualCurrentRows[2].querySelectorAll('td')[colIndex].textContent = totalRuns;
+                        annualCurrentRows[2].querySelectorAll('td')[colIndex].classList.add('table-danger');
+                        // Recalculate last row for current month: row 2 - row 3
+                        const row2Val = parseFloat(annualCurrentRows[1].querySelectorAll('td')[colIndex].textContent.trim()) || 0;
+                        const lastRowIndex = annualCurrentRows.length - 1;
+                        const lastRowVal = row2Val - totalRuns;
+                        annualCurrentRows[lastRowIndex].querySelectorAll('td')[colIndex].textContent = lastRowVal;
+                        annualCurrentRows[lastRowIndex].querySelectorAll('td')[colIndex].classList.add('table-danger');
+                        // Loop through subsequent months till column O
+                        for (let nextCol = colIndex + 1; nextCol <= 14 && nextCol < headers.length; nextCol++) {
+                            // Copy last row of previous month to row 2 of this month
+                            const prevLastVal = parseFloat(annualCurrentRows[lastRowIndex].querySelectorAll('td')[nextCol - 1].textContent.trim()) || 0;
+                            annualCurrentRows[1].querySelectorAll('td')[nextCol].textContent = prevLastVal;
+                            annualCurrentRows[1].querySelectorAll('td')[nextCol].classList.add('table-danger');
+                            // Recalculate last row: row 2 - row 3
+                            const row2Next = parseFloat(annualCurrentRows[1].querySelectorAll('td')[nextCol].textContent.trim()) || 0;
+                            const row3Next = parseFloat(annualCurrentRows[2].querySelectorAll('td')[nextCol].textContent.trim()) || 0;
+                            const lastValNext = row2Next - row3Next;
+                            annualCurrentRows[lastRowIndex].querySelectorAll('td')[nextCol].textContent = lastValNext;
+                            annualCurrentRows[lastRowIndex].querySelectorAll('td')[nextCol].classList.add('table-danger');
+                        }
+                        // Recalculate column P (index 15) for rows 3 and 4: sum of D to O
+                        const sumRows = [2, 3]; // indices for row 3 and 4
+                        sumRows.forEach(rowIdx => {
+                            if (annualCurrentRows[rowIdx]) {
+                                let sum = 0;
+                                for (let col = 3; col <= 14; col++) {
+                                    sum += parseFloat(annualCurrentRows[rowIdx].querySelectorAll('td')[col].textContent.trim()) || 0;
+                                }
+                                annualCurrentRows[rowIdx].querySelectorAll('td')[15].textContent = sum;
+                                annualCurrentRows[rowIdx].querySelectorAll('td')[15].classList.add('table-danger');
+                            }
+                        });
+                        
+                        // After all calculations, trigger workflow processing
+                        triggerWorkflowProcessing();
+                    }
+                }
+            }
+        }
+        
+        function triggerWorkflowProcessing() {
+            const fileId = {% if uploaded_file %}{{ uploaded_file.id }}{% else %}null{% endif %};
+            if (!fileId) {
+                alert('File ID not found. Please upload the file again.');
+                return;
+            }
+            
+            // Show processing status
+            document.getElementById('processingStatus').style.display = 'block';
+            document.getElementById('processingError').style.display = 'none';
+            document.getElementById('processingSuccess').style.display = 'none';
+            document.getElementById('downloadFinalDiv').style.display = 'none';
+            
+            // Make AJAX request to process all workflows
+            const formData = new FormData();
+            formData.append('file_id', fileId);
+            formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+            
+            fetch('{% url "process_all_workflows" %}', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('processingStatus').style.display = 'none';
+                if (data.success) {
+                    document.getElementById('processingSuccess').innerHTML = 
+                        '<strong>Success!</strong> ' + data.message + 
+                        '<br>Products: ' + data.summary.products + 
+                        ', Total Forecast: ' + data.summary.total_forecast.toFixed(2) +
+                        ', Raw Material: ' + data.summary.total_raw_material.toFixed(2);
+                    document.getElementById('processingSuccess').style.display = 'block';
+                    
+                    // Show download button
+                    const downloadBtn = document.getElementById('downloadFinalBtn');
+                    downloadBtn.href = data.download_url;
+                    document.getElementById('downloadFinalDiv').style.display = 'block';
+                } else {
+                    document.getElementById('processingError').textContent = data.error || 'An error occurred during processing.';
+                    document.getElementById('processingError').style.display = 'block';
+                }
+            })
+            .catch(error => {
+                document.getElementById('processingStatus').style.display = 'none';
+                document.getElementById('processingError').textContent = 'Network error: ' + error.message;
+                document.getElementById('processingError').style.display = 'block';
+            });
+        }
+        
+        // Initialize charts if data is available
+        {% if chart_data_json %}
+        document.addEventListener('DOMContentLoaded', function() {
+            const chartData = {{ chart_data_json|safe }};
+            const forecastData = {{ forecast_data|safe }};
+            const ctx = document.getElementById('monthlyForecastChart');
+            
+            // Populate monthly values table
+            const tableBody = document.getElementById('monthlyValuesTableBody');
+            if (tableBody && forecastData) {
+                forecastData.all_months.forEach((month, index) => {
+                    const row = document.createElement('tr');
+                    const isHistorical = index <= forecastData.prediction_point;
+                    const value = forecastData.all_values[index];
+                    
+                    row.innerHTML = `
+                        <td><strong>${month}</strong></td>
+                        <td>${isHistorical ? value.toFixed(2) : '-'}</td>
+                        <td>${!isHistorical ? '<span class="text-danger fw-bold">' + value.toFixed(2) + '</span>' : '-'}</td>
+                    `;
+                    tableBody.appendChild(row);
+                });
+            }
+            
+            if (ctx && chartData) {
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: chartData.labels,
+                        datasets: chartData.datasets
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: 'Monthly Trends with Predictions'
+                            },
+                            legend: {
+                                display: true,
+                                position: 'top'
+                            },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false,
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.dataset.label || '';
+                                        if (label) {
+                                            label += ': ';
+                                        }
+                                        if (context.parsed.y !== null) {
+                                            label += context.parsed.y.toFixed(2);
+                                        }
+                                        return label;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Value'
+                                }
+                            },
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Month'
+                                }
+                            }
+                        },
+                        interaction: {
+                            mode: 'nearest',
+                            axis: 'x',
+                            intersect: false
+                        }
+                    }
+                });
+            }
+        });
+        {% endif %}
+        
+        {% if ingredient_charts_json %}
+        document.addEventListener('DOMContentLoaded', function() {
+            {% for ing_name, ing_chart_json in ingredient_charts_json.items %}
+            const ctx_{{ ing_name|slugify }} = document.getElementById('ingredientChart_{{ ing_name }}');
+            if (ctx_{{ ing_name|slugify }}) {
+                const ingChartData_{{ ing_name|slugify }} = {{ ing_chart_json|safe }};
+                new Chart(ctx_{{ ing_name|slugify }}, {
+                    type: 'line',
+                    data: {
+                        labels: ingChartData_{{ ing_name|slugify }}.labels,
+                        datasets: ingChartData_{{ ing_name|slugify }}.datasets
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top'
+                            },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            }
+            {% endfor %}
+        });
+        {% endif %}
+    </script>
+</body>
+</html>

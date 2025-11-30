@@ -1,0 +1,25 @@
+This is a Django web application called "Blast Project" designed for uploading and processing Excel files, particularly those related to manufacturing or production planning for MCT oil products derived from coconuts.
+
+Key functionalities built so far:
+
+1. **File Upload Interface**: Users can upload Excel files through a web form at the main page (/excel/). The interface uses Bootstrap for styling and includes a file input that accepts .xlsx files, along with a "Proceed" button to initiate processing.
+
+2. **Excel Data Parsing**: Upon upload, the application uses pandas to read the Excel file and intelligently parses its structure by identifying different regions:
+   - Title row at the top
+   - Annual data sections with headers and data sets (organized in groups of 5 rows separated by empty rows)
+   - Ingredient-specific data for various MCT products (MCT360, MCT165, MCTSTICK10, MCTSTICK30, MCTSTICK16, MCTITTO_C)
+
+3. **Data Storage**: The app stores uploaded files and processed data in a SQLite database using two main models:
+   - UploadedExcelFile: Stores the uploaded file and timestamp
+   - ProcessedData: Stores the parsed and manipulated data as JSON
+
+4. **Data Visualization**: After upload and processing, the parsed data is displayed on the web page in collapsible accordion sections using Bootstrap components, organizing different blocks such as annual data and individual ingredient data:
+    - Full parsed data table
+    - Annual data table
+    - Separate tables for each ingredient type
+
+5. **Download Capability**: The application includes a "Download Uploaded File" button in the user interface to download processed Excel files via API endpoints.
+
+6. **Session Management**: Annual data is stored in the user's session for potential further processing.
+
+The application is built with Django 5.2.8, uses pandas for Excel manipulation, and openpyxl for Excel file handling. It follows standard Django project structure with a main project directory and an "excel_handler" app containing the core functionality.
