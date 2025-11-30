@@ -24,6 +24,19 @@ from .prediction_utils import (
     generate_forecast_data,
     prepare_chart_data,
 )
+from .excel_extractor import (
+    extract_monthly_series,
+    extract_from_workflow4_sheet,
+    extract_from_ingredient_section,
+    normalize_month_name,
+    normalize_numeric_value,
+    FISCAL_MONTHS,
+)
+import logging
+
+logger = logging.getLogger(__name__)
+
+logger = logging.getLogger(__name__)
 
 def compare_files(df, sample_df):
     # Skeletal comparison function - always pass for now
@@ -438,6 +451,69 @@ def process_all_workflows(request):
         except ValueError:
             download_url = f"{settings.MEDIA_URL}uploads/processed/{final_output_path.name}"
         
+        # Generate chart data from workflow4 results
+        products_chart_data = []
+        
+        try:
+            # Extract historical data from monthly_trend
+            if not result.monthly_trend.empty:
+                # Group by product
+                for product, group in result.monthly_trend.groupby('product'):
+                    historical = []
+                    # Sort by month
+                    group_sorted = group.sort_values('month')
+                    
+                    current_year = datetime.now().year
+                    for _, row in group_sorted.iterrows():
+                        month_name = str(row['month'])
+                        value = float(row['demand'])
+                        
+                        # Convert month name to YYYY-MM format
+                        try:
+                            month_num = MONTH_NAMES.index(month_name) + 1
+                            historical.append({
+                                'month': f"{current_year}-{month_num:02d}",
+                                'value': value
+                            })
+                        except ValueError:
+                            # If month not in MONTH_NAMES, try to parse
+                            logger.warning("Unknown month name: %s", month_name)
+                            continue
+                    
+                    # Get predicted value from forecast table
+                    product_forecast = result.forecast_table[
+                        result.forecast_table['Product'] == product
+                    ]
+                    
+                    predicted = []
+                    if not product_forecast.empty:
+                        forecast_value = float(product_forecast.iloc[0]['Forecast Demand'])
+                        
+                        # Generate 6 months of predictions
+                        if historical:
+                            last_month = historical[-1]['month']
+                            year, month = map(int, last_month.split('-'))
+                            
+                            for i in range(1, 7):
+                                month += 1
+                                if month > 12:
+                                    month = 1
+                                    year += 1
+                                
+                                predicted.append({
+                                    'month': f"{year}-{month:02d}",
+                                    'value': forecast_value
+                                })
+                    
+                    products_chart_data.append({
+                        'product_code': str(product),
+                        'sheet_name': 'Workflow 4',
+                        'historical': historical,
+                        'predicted': predicted
+                    })
+        except Exception as e:
+            logger.error("Error generating chart data: %s", str(e), exc_info=True)
+        
         return JsonResponse({
             'success': True,
             'message': 'All workflows completed successfully.',
@@ -447,6 +523,11 @@ def process_all_workflows(request):
                 'products': result.summary['products'],
                 'total_forecast': result.summary['total_forecast'],
                 'total_raw_material': result.summary['total_raw_material'],
+            },
+            'chart_data': {
+                'file_id': str(file_id),
+                'products': products_chart_data,
+                'processed_at': datetime.utcnow().isoformat() + 'Z'
             }
         })
     except UploadedExcelFile.DoesNotExist:
@@ -491,31 +572,178 @@ def download_final_file(request, file_id):
 
 def get_chart_data(request, file_id):
     """
-    API endpoint to get chart data for a specific file.
+    Standardized API endpoint to get chart data for a specific file.
+    Returns data in the format expected by frontend charts.
     """
     try:
         uploaded_file_obj = UploadedExcelFile.objects.get(id=file_id)
-        processed_data = ProcessedData.objects.filter(original_file=uploaded_file_obj).first()
         
-        if not processed_data:
-            return JsonResponse({'error': 'No processed data found'}, status=404)
+        # Try to get processed Excel file from workflow4
+        processed_dir = Path(settings.MEDIA_ROOT) / 'uploads' / 'processed'
+        pattern = f"processed_{file_id}_*.xlsx"
+        matching_files = list(processed_dir.glob(pattern))
         
-        data = processed_data.data
-        annual_data = [{k: v for k, v in row.items() if k != 'region' and k <= 'P'} 
-                       for row in data if row.get('region') in ['annual_data', 'annual_separator']][1:]
+        products_data = []
         
-        # Extract and prepare chart data
-        monthly_data = extract_monthly_data_from_annual(annual_data)
-        monthly_totals = calculate_monthly_totals(monthly_data)
-        forecast_data = generate_forecast_data(monthly_totals, num_future_months=6)
-        chart_data = prepare_chart_data(monthly_totals, forecast_data)
+        if matching_files:
+            # Use the most recent processed file
+            latest_file = max(matching_files, key=lambda p: p.stat().st_mtime)
+            logger.info("Extracting chart data from processed file: %s", latest_file)
+            
+            # Read the Excel file
+            excel_file = pd.ExcelFile(latest_file)
+            
+            # Try to get data from Workflow 4 sheet
+            workflow4_sheet = None
+            for sheet_name in excel_file.sheet_names:
+                if 'workflow' in sheet_name.lower() and '4' in sheet_name:
+                    workflow4_sheet = pd.read_excel(latest_file, sheet_name=sheet_name)
+                    break
+            
+            if workflow4_sheet is not None and not workflow4_sheet.empty:
+                # Extract product codes from Workflow 4 sheet
+                if 'Product' in workflow4_sheet.columns:
+                    product_codes = workflow4_sheet['Product'].dropna().unique()
+                    
+                    for product_code in product_codes:
+                        product_str = str(product_code).strip()
+                        if not product_str:
+                            continue
+                        
+                        # Get historical data from monthly_trend if available
+                        # Otherwise extract from original Excel
+                        historical = []
+                        predicted = []
+                        
+                        # Try to get from workflow4 monthly_trend
+                        # For now, extract from the original file structure
+                        try:
+                            # Read original file to get historical data
+                            original_df = pd.read_excel(uploaded_file_obj.file.path, header=None)
+                            original_df.columns = [chr(65 + i) for i in range(len(original_df.columns))]
+                            
+                            # Extract monthly series
+                            monthly_series = extract_from_workflow4_sheet(
+                                str(latest_file), product_str
+                            )
+                            
+                            # Convert to historical format
+                            for month_name, value in monthly_series.items():
+                                # Create YYYY-MM format (using current year as base)
+                                current_year = datetime.now().year
+                                month_num = FISCAL_MONTHS.index(month_name) + 4  # April = 4
+                                if month_num > 12:
+                                    month_num -= 12
+                                    year = current_year + 1
+                                else:
+                                    year = current_year
+                                
+                                historical.append({
+                                    'month': f"{year}-{month_num:02d}",
+                                    'value': float(value)
+                                })
+                            
+                            # Get predicted values from Workflow 4 forecast table
+                            product_row = workflow4_sheet[workflow4_sheet['Product'] == product_code]
+                            if not product_row.empty:
+                                forecast_demand = float(product_row.iloc[0]['Forecast Demand'])
+                                
+                                # Generate predicted months (next 6 months)
+                                if historical:
+                                    last_month = historical[-1]['month']
+                                    year, month = map(int, last_month.split('-'))
+                                    
+                                    for i in range(1, 7):
+                                        month += 1
+                                        if month > 12:
+                                            month = 1
+                                            year += 1
+                                        
+                                        predicted.append({
+                                            'month': f"{year}-{month:02d}",
+                                            'value': forecast_demand  # Use forecast demand for all predicted months
+                                        })
+                            
+                        except Exception as e:
+                            logger.error("Error extracting data for product %s: %s", product_str, str(e))
+                            continue
+                        
+                        products_data.append({
+                            'product_code': product_str,
+                            'sheet_name': 'Workflow 4',
+                            'historical': historical,
+                            'predicted': predicted
+                        })
+        
+        # If no workflow4 data, try to extract from ingredient sections
+        if not products_data:
+            processed_data = ProcessedData.objects.filter(original_file=uploaded_file_obj).first()
+            if processed_data:
+                data = processed_data.data
+                ingredient_list = []
+                ingredients = ['mct360', 'mct165', 'mctstick10', 'mctstick30', 'mctstick16', 'mctitto_c']
+                
+                for ing_name in ingredients:
+                    ing_rows = [row for row in data 
+                               if row.get('region', '').startswith(f'ingredient_{ing_name}')]
+                    if ing_rows:
+                        ingredient_list.append((ing_name, ing_rows))
+                
+                for ing_name, rows in ingredient_list:
+                    monthly_series = extract_from_ingredient_section(rows, ing_name.upper())
+                    
+                    historical = []
+                    predicted = []
+                    
+                    current_year = datetime.now().year
+                    for month_name, value in monthly_series.items():
+                        month_num = FISCAL_MONTHS.index(month_name) + 4
+                        if month_num > 12:
+                            month_num -= 12
+                            year = current_year + 1
+                        else:
+                            year = current_year
+                        
+                        historical.append({
+                            'month': f"{year}-{month_num:02d}",
+                            'value': float(value)
+                        })
+                    
+                    # Generate predictions
+                    if historical:
+                        historical_values = [h['value'] for h in historical]
+                        from .prediction_utils import predict_next_months
+                        predictions = predict_next_months(historical_values, 6, 'moving_average')
+                        
+                        last_month = historical[-1]['month']
+                        year, month = map(int, last_month.split('-'))
+                        
+                        for pred_value in predictions:
+                            month += 1
+                            if month > 12:
+                                month = 1
+                                year += 1
+                            
+                            predicted.append({
+                                'month': f"{year}-{month:02d}",
+                                'value': float(pred_value)
+                            })
+                    
+                    products_data.append({
+                        'product_code': ing_name.upper(),
+                        'sheet_name': 'Ingredient Section',
+                        'historical': historical,
+                        'predicted': predicted
+                    })
         
         return JsonResponse({
-            'success': True,
-            'chart_data': chart_data,
-            'forecast_data': forecast_data
+            'file_id': str(file_id),
+            'products': products_data,
+            'processed_at': datetime.utcnow().isoformat() + 'Z'
         })
+        
     except UploadedExcelFile.DoesNotExist:
         return JsonResponse({'error': 'File not found'}, status=404)
     except Exception as exc:
+        logger.error("Error in get_chart_data: %s", str(exc), exc_info=True)
         return JsonResponse({'error': f'An error occurred: {str(exc)}'}, status=500)

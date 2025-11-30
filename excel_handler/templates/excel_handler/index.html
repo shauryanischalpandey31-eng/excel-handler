@@ -239,9 +239,10 @@
         </div>
         {% endif %}
         
-        {% if chart_data_json or ingredient_charts_json %}
-        <div class="mt-5">
+        <div class="mt-5" id="chartsSection" style="display: none;">
             <h2 class="mb-4">Monthly Trends & Predictions</h2>
+            
+        {% if chart_data_json or ingredient_charts_json %}
             
             {% if chart_data_json %}
             <div class="card mb-4">
@@ -649,6 +650,160 @@
             }
         }
         
+        // Function to render charts from standardized chart data
+        function renderChartsFromData(chartData) {
+            if (!chartData || !chartData.products || chartData.products.length === 0) {
+                console.warn('No chart data available');
+                return;
+            }
+            
+            // For now, render the first product or aggregate all products
+            const firstProduct = chartData.products[0];
+            
+            // Prepare data for Chart.js
+            const allMonths = [];
+            const historicalValues = [];
+            const predictedValues = [];
+            
+            // Combine historical and predicted months
+            firstProduct.historical.forEach(item => {
+                allMonths.push(item.month);
+                historicalValues.push(item.value);
+                predictedValues.push(null);
+            });
+            
+            firstProduct.predicted.forEach(item => {
+                allMonths.push(item.month);
+                historicalValues.push(null);
+                predictedValues.push(item.value);
+            });
+            
+            // Create chart - use dynamic chart canvas
+            const ctx = document.getElementById('monthlyForecastChart');
+            if (!ctx) {
+                console.error('Chart canvas not found');
+                return;
+            }
+            
+            if (ctx) {
+                // Destroy existing chart if it exists
+                if (window.monthlyForecastChartInstance) {
+                    window.monthlyForecastChartInstance.destroy();
+                }
+                
+                window.monthlyForecastChartInstance = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: allMonths,
+                        datasets: [
+                            {
+                                label: 'Historical Data',
+                                data: historicalValues,
+                                borderColor: 'rgb(75, 192, 192)',
+                                backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                                tension: 0.1,
+                                pointRadius: 4
+                            },
+                            {
+                                label: 'Predicted',
+                                data: predictedValues,
+                                borderColor: 'rgb(255, 99, 132)',
+                                backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                                borderDash: [5, 5],
+                                tension: 0.1,
+                                pointRadius: 4
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: `Monthly Trends: ${firstProduct.product_code}`
+                            },
+                            legend: {
+                                display: true,
+                                position: 'top'
+                            },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false,
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.dataset.label || '';
+                                        if (label) {
+                                            label += ': ';
+                                        }
+                                        if (context.parsed.y !== null && !isNaN(context.parsed.y)) {
+                                            label += context.parsed.y.toLocaleString('en-US', {
+                                                minimumFractionDigits: 2,
+                                                maximumFractionDigits: 2
+                                            });
+                                        } else {
+                                            label += 'N/A';
+                                        }
+                                        return label;
+                                    },
+                                    footer: function(tooltipItems) {
+                                        return 'Source: ' + firstProduct.sheet_name + ' | Processed: ' + 
+                                               new Date(chartData.processed_at).toLocaleString();
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Value'
+                                }
+                            },
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Month'
+                                }
+                            }
+                        },
+                        interaction: {
+                            mode: 'nearest',
+                            axis: 'x',
+                            intersect: false
+                        }
+                    }
+                });
+            }
+            
+            // Populate table
+            const tableBody = document.getElementById('monthlyValuesTableBody');
+            if (tableBody) {
+                tableBody.innerHTML = ''; // Clear existing rows
+                
+                firstProduct.historical.forEach(item => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td><strong>${item.month}</strong></td>
+                        <td>${item.value.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                        <td>-</td>
+                    `;
+                    tableBody.appendChild(row);
+                });
+                
+                firstProduct.predicted.forEach(item => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td><strong>${item.month}</strong></td>
+                        <td>-</td>
+                        <td><span class="text-danger fw-bold">${item.value.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></td>
+                    `;
+                    tableBody.appendChild(row);
+                });
+            }
+        }
+        
         function triggerWorkflowProcessing() {
             const fileId = {% if uploaded_file %}{{ uploaded_file.id }}{% else %}null{% endif %};
             if (!fileId) {
@@ -686,6 +841,18 @@
                     const downloadBtn = document.getElementById('downloadFinalBtn');
                     downloadBtn.href = data.download_url;
                     document.getElementById('downloadFinalDiv').style.display = 'block';
+                    
+                    // Render charts if chart data is available
+                    if (data.chart_data && data.chart_data.products && data.chart_data.products.length > 0) {
+                        // Show dynamic charts section
+                        const dynamicChartsSection = document.getElementById('dynamicChartsSection');
+                        if (dynamicChartsSection) {
+                            dynamicChartsSection.style.display = 'block';
+                            // Scroll to charts
+                            dynamicChartsSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        }
+                        renderChartsFromData(data.chart_data);
+                    }
                 } else {
                     document.getElementById('processingError').textContent = data.error || 'An error occurred during processing.';
                     document.getElementById('processingError').style.display = 'block';
@@ -703,7 +870,7 @@
         document.addEventListener('DOMContentLoaded', function() {
             const chartData = {{ chart_data_json|safe }};
             const forecastData = {{ forecast_data|safe }};
-            const ctx = document.getElementById('monthlyForecastChart');
+            const ctx = document.getElementById('monthlyForecastChartStatic');
             
             // Populate monthly values table
             const tableBody = document.getElementById('monthlyValuesTableBody');
@@ -750,8 +917,13 @@
                                         if (label) {
                                             label += ': ';
                                         }
-                                        if (context.parsed.y !== null) {
-                                            label += context.parsed.y.toFixed(2);
+                                        if (context.parsed.y !== null && !isNaN(context.parsed.y)) {
+                                            label += context.parsed.y.toLocaleString('en-US', {
+                                                minimumFractionDigits: 2,
+                                                maximumFractionDigits: 2
+                                            });
+                                        } else {
+                                            label += 'N/A';
                                         }
                                         return label;
                                     }
