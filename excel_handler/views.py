@@ -150,8 +150,41 @@ def index(request):
             ProcessedData.objects.create(original_file=uploaded_file, data=json.loads(json.dumps(data, default=str)))
         except Exception as e:
             error_message = f"Error processing file: {str(e)}"
+            logger.error("Error processing file: %s", str(e), exc_info=True)
     
-    # Prepare chart data for template
+    # Extract chart data from Excel for template
+    overall_months = []
+    overall_historical = []
+    overall_predicted = []
+    ingredient_chart_data = {}
+    
+    if annual_data or ingredient_list:
+        try:
+            # Extract real data from Excel
+            extracted_data = extract_real_data_from_excel(ingredient_list, annual_data)
+            
+            # Format overall data
+            overall_data = extracted_data.get('overall', {})
+            if overall_data:
+                overall_months = overall_data.get('months', [])
+                overall_historical = overall_data.get('historical', [])
+                overall_predicted = overall_data.get('predicted', [])
+            
+            # Format ingredient data
+            ingredients_data = extracted_data.get('ingredients', {})
+            if ingredients_data:
+                for ing_name, ing_data in ingredients_data.items():
+                    if ing_data and isinstance(ing_data, dict):
+                        ingredient_chart_data[ing_name] = {
+                            'months': ing_data.get('months', []),
+                            'historical': ing_data.get('historical', []),
+                            'predicted': ing_data.get('predicted', [])
+                        }
+        except Exception as e:
+            logger.error("Error extracting chart data: %s", str(e), exc_info=True)
+            # Continue with empty data rather than failing
+    
+    # Prepare chart data for template (convert to JSON)
     overall_months_json = json.dumps(overall_months) if overall_months else None
     overall_historical_json = json.dumps(overall_historical) if overall_historical else None
     overall_predicted_json = json.dumps(overall_predicted) if overall_predicted else None
@@ -481,52 +514,94 @@ def process_all_workflows(request):
                             break
         
         # Build chart data from workflow4 results
-        chart_data_dict = build_chart_data_from_workflow4(result, ingredient_list, annual_data)
+        try:
+            chart_data_dict = build_chart_data_from_workflow4(result, ingredient_list, annual_data)
+        except Exception as e:
+            logger.error("Error building chart data from workflow4: %s", str(e), exc_info=True)
+            # Fallback: use empty structure
+            chart_data_dict = {
+                'overall': {'months': [], 'historical': [], 'predicted': []},
+                'ingredients': {}
+            }
         
         # Convert to JSON format for frontend
         products_chart_data = []
         
+        # Helper function to generate predicted months from last historical month
+        def generate_predicted_months(last_month_name, num_months=6):
+            """Generate next N months following fiscal month order"""
+            predicted_months = []
+            if last_month_name in FISCAL_MONTHS:
+                last_month_idx = FISCAL_MONTHS.index(last_month_name)
+                for i in range(1, num_months + 1):
+                    next_idx = (last_month_idx + i) % 12
+                    predicted_months.append(FISCAL_MONTHS[next_idx])
+            elif last_month_name in MONTH_NAMES:
+                # Convert calendar month to fiscal month order
+                # Find the fiscal month index
+                last_month_idx = MONTH_NAMES.index(last_month_name)
+                # Map to fiscal order: April=0, May=1, ..., March=11
+                fiscal_idx = (last_month_idx - 3) % 12  # April (index 3) -> 0
+                for i in range(1, num_months + 1):
+                    next_fiscal_idx = (fiscal_idx + i) % 12
+                    # Map back to calendar month
+                    calendar_idx = (next_fiscal_idx + 3) % 12
+                    predicted_months.append(MONTH_NAMES[calendar_idx])
+            else:
+                # Default: start from current month
+                current_month = datetime.now().month - 1  # 0-indexed
+                for i in range(1, num_months + 1):
+                    next_idx = (current_month + i) % 12
+                    predicted_months.append(MONTH_NAMES[next_idx])
+            return predicted_months
+        
         # Add overall data as first product
-        if chart_data_dict['overall']['months']:
+        overall_data = chart_data_dict.get('overall', {})
+        if overall_data and overall_data.get('months') and overall_data.get('historical'):
+            overall_historical = overall_data.get('historical', [])
+            overall_predicted = overall_data.get('predicted', [])
+            overall_months = overall_data.get('months', [])
+            
+            # Generate predicted month names
+            if overall_months:
+                predicted_month_names = generate_predicted_months(overall_months[-1], len(overall_predicted))
+            else:
+                predicted_month_names = [MONTH_NAMES[(datetime.now().month - 1 + i) % 12] for i in range(1, len(overall_predicted) + 1)]
+            
             products_chart_data.append({
                 'product_code': 'OVERALL',
                 'sheet_name': 'Workflow 4',
                 'historical': [
                     {'month': month, 'value': val} 
-                    for month, val in zip(chart_data_dict['overall']['months'], chart_data_dict['overall']['historical'])
+                    for month, val in zip(overall_months, overall_historical)
                 ],
                 'predicted': [
-                    {'month': f"2025-{i+1:02d}", 'value': val} 
-                    for i, val in enumerate(chart_data_dict['overall']['predicted'])
+                    {'month': month, 'value': val} 
+                    for month, val in zip(predicted_month_names, overall_predicted)
                 ]
             })
         
         # Add ingredient data
-        for ing_name, ing_data in chart_data_dict['ingredients'].items():
-            if ing_data['months']:
-                # Generate predicted months
-                predicted_months = []
-                if ing_data['months']:
-                    last_month_idx = MONTH_NAMES.index(ing_data['months'][-1]) if ing_data['months'][-1] in MONTH_NAMES else 0
-                    current_year = datetime.now().year
-                    
-                    for i in range(6):
-                        next_month_idx = (last_month_idx + i + 1) % 12
-                        month_name = MONTH_NAMES[next_month_idx]
-                        month_num = next_month_idx + 1
-                        year = current_year if next_month_idx >= last_month_idx else current_year + 1
-                        predicted_months.append(f"{year}-{month_num:02d}")
+        ingredients_data = chart_data_dict.get('ingredients', {})
+        for ing_name, ing_data in ingredients_data.items():
+            ing_months = ing_data.get('months', [])
+            ing_historical = ing_data.get('historical', [])
+            ing_predicted = ing_data.get('predicted', [])
+            
+            if ing_months and ing_historical:
+                # Generate predicted month names
+                predicted_month_names = generate_predicted_months(ing_months[-1], len(ing_predicted))
                 
                 products_chart_data.append({
                     'product_code': ing_name,
                     'sheet_name': 'Workflow 4',
                     'historical': [
                         {'month': month, 'value': val} 
-                        for month, val in zip(ing_data['months'], ing_data['historical'])
+                        for month, val in zip(ing_months, ing_historical)
                     ],
                     'predicted': [
                         {'month': month, 'value': val} 
-                        for month, val in zip(predicted_months, ing_data['predicted'])
+                        for month, val in zip(predicted_month_names, ing_predicted)
                     ]
                 })
         

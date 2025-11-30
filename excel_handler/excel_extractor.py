@@ -256,8 +256,11 @@ def extract_from_ingredient_section(ingredient_data: List[Dict],
         
         if month_values:
             # Use sum or average - typically we want sum for totals
-            monthly_series[month_name] = sum(month_values)
-            logger.debug("  %s: %d values, sum=%.2f", month_name, len(month_values), sum(month_values))
+            total = sum(month_values)
+            # Only add if total is valid (not NaN)
+            if total is not None and not np.isnan(total):
+                monthly_series[month_name] = total
+                logger.debug("  %s: %d values, sum=%.2f", month_name, len(month_values), total)
     
     return monthly_series
 

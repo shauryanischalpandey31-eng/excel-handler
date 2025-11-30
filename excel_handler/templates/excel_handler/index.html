@@ -318,7 +318,7 @@
     </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        const ingredients = [{% for ing, data in ingredient_list %}'{{ ing }}',{% endfor %}];
+        const ingredients = [{% for ing, data in ingredient_list %}'{{ ing|escapejs }}'{% if not forloop.last %},{% endif %}{% endfor %}];
         function confirmProcess() {
             document.getElementById('processMessage').style.display = 'block';
         }
@@ -828,6 +828,304 @@
                     `;
                     tableBody.appendChild(row);
                 });
+            }
+        }
+        
+        // Function to render overall monthly forecast chart
+        function renderOverallChart(months, historical, predicted) {
+            if (!months || !historical || !predicted) {
+                console.warn('Missing data for overall chart');
+                return;
+            }
+            
+            // Combine months for labels
+            const allMonths = [...months];
+            const historicalValues = [...historical];
+            const predictedValues = [];
+            
+            // Add nulls for historical values where predicted will be
+            for (let i = 0; i < months.length; i++) {
+                predictedValues.push(null);
+            }
+            
+            // Add predicted months and values
+            // Assuming predicted array has 6 values, we need to generate month names
+            const lastMonth = months[months.length - 1];
+            const fiscalMonths = ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'];
+            let lastMonthIdx = fiscalMonths.indexOf(lastMonth);
+            if (lastMonthIdx === -1) {
+                // Try calendar months
+                const calendarMonths = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                lastMonthIdx = calendarMonths.indexOf(lastMonth);
+                if (lastMonthIdx !== -1) {
+                    // Convert to fiscal index
+                    lastMonthIdx = (lastMonthIdx - 3 + 12) % 12;
+                } else {
+                    lastMonthIdx = 0;
+                }
+            }
+            
+            for (let i = 0; i < predicted.length; i++) {
+                const nextIdx = (lastMonthIdx + i + 1) % 12;
+                allMonths.push(fiscalMonths[nextIdx]);
+                historicalValues.push(null);
+                predictedValues.push(predicted[i]);
+            }
+            
+            // Get canvas element
+            const ctx = document.getElementById('monthlyForecastChart');
+            if (!ctx) {
+                console.error('Overall chart canvas not found');
+                return;
+            }
+            
+            // Destroy existing chart if it exists
+            if (window.overallChartInstance) {
+                window.overallChartInstance.destroy();
+            }
+            
+            // Create new chart
+            window.overallChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: allMonths,
+                    datasets: [
+                        {
+                            label: 'Historical Data',
+                            data: historicalValues,
+                            borderColor: 'rgb(75, 192, 192)',
+                            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                            tension: 0.1,
+                            pointRadius: 4
+                        },
+                        {
+                            label: 'Predicted',
+                            data: predictedValues,
+                            borderColor: 'rgb(255, 99, 132)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                            borderDash: [5, 5],
+                            tension: 0.1,
+                            pointRadius: 4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Overall Monthly Forecast'
+                        },
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Value'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Month'
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // Populate table
+            const tableBody = document.getElementById('monthlyValuesTableBody');
+            if (tableBody) {
+                tableBody.innerHTML = '';
+                
+                // Add historical rows
+                for (let i = 0; i < months.length; i++) {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td><strong>${months[i]}</strong></td>
+                        <td>${historical[i].toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                        <td>-</td>
+                    `;
+                    tableBody.appendChild(row);
+                }
+                
+                // Add predicted rows
+                for (let i = 0; i < predicted.length; i++) {
+                    const predMonth = fiscalMonths[(lastMonthIdx + i + 1) % 12];
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td><strong>${predMonth}</strong></td>
+                        <td>-</td>
+                        <td><span class="text-danger fw-bold">${predicted[i].toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></td>
+                    `;
+                    tableBody.appendChild(row);
+                }
+            }
+            
+            // Show charts section
+            const chartsSection = document.getElementById('chartsSection');
+            if (chartsSection) {
+                chartsSection.style.display = 'block';
+            }
+        }
+        
+        // Function to render ingredient charts
+        function renderIngredientCharts(ingredientData) {
+            if (!ingredientData || Object.keys(ingredientData).length === 0) {
+                console.warn('No ingredient data available');
+                return;
+            }
+            
+            const container = document.getElementById('ingredientChartsContainer');
+            if (!container) {
+                console.error('Ingredient charts container not found');
+                return;
+            }
+            
+            // Clear existing charts
+            container.innerHTML = '';
+            
+            // Destroy existing chart instances
+            if (window.ingredientChartInstances) {
+                window.ingredientChartInstances.forEach(instance => {
+                    if (instance) instance.destroy();
+                });
+            }
+            window.ingredientChartInstances = [];
+            
+            const fiscalMonths = ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'];
+            
+            // Create a chart for each ingredient
+            Object.keys(ingredientData).forEach((ingName, index) => {
+                const ingData = ingredientData[ingName];
+                if (!ingData || !ingData.months || !ingData.historical) {
+                    return;
+                }
+                
+                // Create canvas container
+                const colDiv = document.createElement('div');
+                colDiv.className = 'col-md-6 mb-4';
+                
+                const cardDiv = document.createElement('div');
+                cardDiv.className = 'card';
+                
+                const cardHeader = document.createElement('div');
+                cardHeader.className = 'card-header bg-info text-white';
+                cardHeader.innerHTML = `<h6 class="mb-0">${ingName}</h6>`;
+                
+                const cardBody = document.createElement('div');
+                cardBody.className = 'card-body';
+                
+                const canvas = document.createElement('canvas');
+                canvas.id = `ingredientChart_${index}`;
+                canvas.height = 100;
+                
+                cardBody.appendChild(canvas);
+                cardDiv.appendChild(cardHeader);
+                cardDiv.appendChild(cardBody);
+                colDiv.appendChild(cardDiv);
+                container.appendChild(colDiv);
+                
+                // Prepare data
+                const months = ingData.months || [];
+                const historical = ingData.historical || [];
+                const predicted = ingData.predicted || [];
+                
+                const allMonths = [...months];
+                const historicalValues = [...historical];
+                const predictedValues = [];
+                
+                // Add nulls for historical positions
+                for (let i = 0; i < months.length; i++) {
+                    predictedValues.push(null);
+                }
+                
+                // Add predicted months
+                if (months.length > 0) {
+                    let lastMonthIdx = fiscalMonths.indexOf(months[months.length - 1]);
+                    if (lastMonthIdx === -1) {
+                        const calendarMonths = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                        lastMonthIdx = calendarMonths.indexOf(months[months.length - 1]);
+                        if (lastMonthIdx !== -1) {
+                            lastMonthIdx = (lastMonthIdx - 3 + 12) % 12;
+                        } else {
+                            lastMonthIdx = 0;
+                        }
+                    }
+                    
+                    for (let i = 0; i < predicted.length; i++) {
+                        const nextIdx = (lastMonthIdx + i + 1) % 12;
+                        allMonths.push(fiscalMonths[nextIdx]);
+                        historicalValues.push(null);
+                        predictedValues.push(predicted[i]);
+                    }
+                }
+                
+                // Create chart
+                const ctx = canvas.getContext('2d');
+                const chartInstance = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: allMonths,
+                        datasets: [
+                            {
+                                label: 'Historical',
+                                data: historicalValues,
+                                borderColor: 'rgb(54, 162, 235)',
+                                backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                                tension: 0.1,
+                                pointRadius: 3
+                            },
+                            {
+                                label: 'Predicted',
+                                data: predictedValues,
+                                borderColor: 'rgb(255, 159, 64)',
+                                backgroundColor: 'rgba(255, 159, 64, 0.2)',
+                                borderDash: [5, 5],
+                                tension: 0.1,
+                                pointRadius: 3
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: `${ingName} Monthly Trends`
+                            },
+                            legend: {
+                                display: true,
+                                position: 'top'
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+                
+                window.ingredientChartInstances.push(chartInstance);
+            });
+            
+            // Show charts section
+            const chartsSection = document.getElementById('chartsSection');
+            if (chartsSection) {
+                chartsSection.style.display = 'block';
             }
         }
         

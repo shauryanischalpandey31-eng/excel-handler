@@ -47,9 +47,11 @@ def extract_real_data_from_excel(
         
         if month_values:
             total = sum(month_values)
-            overall_monthly_values[month_name] = total
-            overall_months.append(month_name)
-            overall_historical.append(total)
+            # Only add if total is valid and > 0
+            if total is not None and not np.isnan(total) and total > 0:
+                overall_monthly_values[month_name] = total
+                overall_months.append(month_name)
+                overall_historical.append(total)
     
     # Generate overall forecast using 3-month moving average
     overall_predicted = []
@@ -88,7 +90,8 @@ def extract_real_data_from_excel(
         for month_name in FISCAL_MONTHS:
             if month_name in monthly_series:
                 value = monthly_series[month_name]
-                if value > 0:  # Only include non-zero values
+                # Check if value is valid (not NaN, not None, and > 0)
+                if value is not None and not np.isnan(value) and value > 0:
                     ing_months.append(month_name)
                     ing_historical.append(float(value))
         
@@ -152,8 +155,12 @@ def build_chart_data_from_workflow4(
         )
         
         for _, row in monthly_aggregated.iterrows():
-            overall_months.append(str(row['month']))
-            overall_historical.append(float(row['demand']))
+            month_name = str(row['month'])
+            demand_value = row.get('demand', 0)
+            # Check if value is valid
+            if demand_value is not None and not np.isnan(demand_value):
+                overall_months.append(month_name)
+                overall_historical.append(float(demand_value))
         
         # Calculate overall forecast (average of last 3 months)
         if len(overall_historical) >= 3:
@@ -194,9 +201,11 @@ def build_chart_data_from_workflow4(
                     
                     for _, row in group_sorted.iterrows():
                         month_name = str(row['month'])
-                        if month_name in MONTH_NAMES:
+                        demand_value = row.get('demand', 0)
+                        # Check if value is valid
+                        if month_name in MONTH_NAMES and demand_value is not None and not np.isnan(demand_value):
                             ing_months.append(month_name)
-                            ing_historical.append(float(row['demand']))
+                            ing_historical.append(float(demand_value))
                     
                     # Get forecast for this product
                     product_forecast = result.forecast_table[
