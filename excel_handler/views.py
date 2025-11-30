@@ -55,6 +55,7 @@ def index(request):
     forecast_data = None
     chart_data_json = None
     ingredient_charts_json = {}
+    ingredients_json = "[]"  # Default empty array for JavaScript
     
     if request.method == 'POST' and request.FILES.get('excel_file'):
         excel_file = request.FILES['excel_file']
@@ -157,6 +158,7 @@ def index(request):
     overall_historical = []
     overall_predicted = []
     ingredient_chart_data = {}
+    ingredients_json = "[]"  # Default empty array
     
     if annual_data or ingredient_list:
         try:
@@ -184,11 +186,17 @@ def index(request):
             logger.error("Error extracting chart data: %s", str(e), exc_info=True)
             # Continue with empty data rather than failing
     
-    # Prepare chart data for template (convert to JSON)
-    overall_months_json = json.dumps(overall_months) if overall_months else None
-    overall_historical_json = json.dumps(overall_historical) if overall_historical else None
-    overall_predicted_json = json.dumps(overall_predicted) if overall_predicted else None
-    ingredient_data_json = json.dumps(ingredient_chart_data) if ingredient_chart_data else None
+    # Prepare all chart data as a single JSON object for JavaScript
+    chart_data_for_template = {
+        'overall': {
+            'months': overall_months,
+            'historical': overall_historical,
+            'predicted': overall_predicted
+        },
+        'ingredients': ingredient_chart_data,
+        'ingredients_list': [ing for ing, _ in ingredient_list]
+    }
+    chart_data_json = json.dumps(chart_data_for_template)
     
     return render(request, 'excel_handler/index.html', {
         'data': data, 
@@ -197,10 +205,7 @@ def index(request):
         'uploaded_file': uploaded_file,
         'error_message': error_message,
         'warning_message': warning_message,
-        'overall_months': overall_months_json,
-        'overall_historical': overall_historical_json,
-        'overall_predicted': overall_predicted_json,
-        'ingredient_data': ingredient_data_json,
+        'chart_data_json': chart_data_json,
     })
 
 def parse_excel_regions(df):
