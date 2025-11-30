@@ -131,6 +131,7 @@ def detect_month_columns(df: pd.DataFrame, max_header_rows: int = 10) -> Dict[st
 def detect_product_blocks(df: pd.DataFrame, start_row: int = 0) -> List[Dict[str, Any]]:
     """
     Detect product blocks by looking for product codes.
+    Specifically detects: MCT360, MCT165, MCTSTICK10, MCTSTICK30, MCTSTICK16, MCTITTO_C
     Returns list of product info with row ranges.
     """
     products = []
@@ -147,27 +148,37 @@ def detect_product_blocks(df: pd.DataFrame, start_row: int = 0) -> List[Dict[str
             if not cell_str or len(cell_str) < 2:
                 continue
             
-            # Check if it matches known products or looks like a product code
-            is_known_product = any(prod in cell_str or cell_str in prod for prod in KNOWN_PRODUCTS)
-            has_letters = any(c.isalpha() for c in cell_str)
-            is_long_enough = len(cell_str) >= 2
-            not_pure_number = not cell_str.replace('.', '').replace('-', '').isdigit()
+            # Check for exact or partial match with known products
+            matched_product = None
+            for known_product in KNOWN_PRODUCTS:
+                # Check if cell contains product code or vice versa
+                if known_product in cell_str or cell_str in known_product:
+                    matched_product = known_product
+                    break
             
-            if (is_known_product or (has_letters and is_long_enough and not_pure_number)) and cell_str not in seen_codes:
-                seen_codes.add(cell_str)
-                # Find the matching known product code if partial match
-                product_code = cell_str
-                for known in KNOWN_PRODUCTS:
-                    if known in cell_str or cell_str in known:
-                        product_code = known
-                        break
-                
+            # If matched a known product and not already seen
+            if matched_product and matched_product not in seen_codes:
+                seen_codes.add(matched_product)
                 products.append({
-                    'code': product_code,
+                    'code': matched_product,
                     'row_index': row_idx,
                     'name': cell_str,
                     'column_index': col_idx
                 })
+            # Also check for product-like codes (alphanumeric, contains letters)
+            elif matched_product is None:
+                has_letters = any(c.isalpha() for c in cell_str)
+                is_long_enough = len(cell_str) >= 2
+                not_pure_number = not cell_str.replace('.', '').replace('-', '').isdigit()
+                
+                if has_letters and is_long_enough and not_pure_number and cell_str not in seen_codes:
+                    seen_codes.add(cell_str)
+                    products.append({
+                        'code': cell_str,
+                        'row_index': row_idx,
+                        'name': cell_str,
+                        'column_index': col_idx
+                    })
     
     return products
 
@@ -325,19 +336,29 @@ class UniversalDataExtractor:
                 'overall': {'historical': {}, 'predicted': {}}
             }
     
-    def _calculate_predictions(self, historical_data: Dict[str, float], num_months: int = 12) -> Dict[str, float]:
+    def _calculate_predictions(self, historical_data: Dict[str, float], num_months: int = 6) -> Dict[str, float]:
         """
         Calculate predictions using 3-month moving average.
-        Returns dict: {month_name: float_value}
+        Returns dict: {month_name: float_value} for next 6 months.
+        All values are pure Python floats.
         """
         if not historical_data:
             return {}
         
-        # Get values in fiscal month order
+        # Get values in fiscal month order - ensure pure floats
         historical_values = []
         for month_name in FISCAL_MONTHS:
             if month_name in historical_data:
-                historical_values.append(float(historical_data[month_name]))
+                val = historical_data[month_name]
+                # Convert to pure float, handle all types
+                if val is None or pd.isna(val):
+                    continue
+                try:
+                    float_val = float(val)
+                    if not np.isnan(float_val) and not np.isinf(float_val):
+                        historical_values.append(float_val)
+                except (ValueError, TypeError):
+                    continue
         
         if not historical_values:
             return {}
@@ -350,7 +371,10 @@ class UniversalDataExtractor:
         else:
             forecast_value = float(historical_values[-1])
         
-        # Generate predicted months
+        # Ensure forecast_value is a pure float (not numpy type)
+        forecast_value = float(forecast_value)
+        
+        # Generate predicted months (next 6 months only)
         predicted = {}
         last_month_idx = -1
         for i, month_name in enumerate(FISCAL_MONTHS):
@@ -358,10 +382,10 @@ class UniversalDataExtractor:
                 last_month_idx = i
         
         if last_month_idx >= 0:
-            for i in range(num_months):
+            for i in range(num_months):  # 6 months
                 next_idx = (last_month_idx + i + 1) % 12
                 next_month = FISCAL_MONTHS[next_idx]
-                predicted[next_month] = forecast_value
+                predicted[next_month] = forecast_value  # Pure float
         
         return predicted
 

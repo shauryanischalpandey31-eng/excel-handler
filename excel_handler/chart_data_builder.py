@@ -80,9 +80,21 @@ class ChartDataBuilder:
             for month_name in FISCAL_MONTHS:
                 if month_name in historical_dict:
                     value = historical_dict[month_name]
+                    # Safeguard: ensure value is a pure float, not pandas/numpy object
                     if value is not None:
-                        months.append(month_name)
-                        historical.append(float(value))  # Ensure pure float
+                        try:
+                            # Convert to pure float, handle all types
+                            if hasattr(value, 'item'):  # numpy scalar
+                                float_val = float(value.item())
+                            else:
+                                float_val = float(value)
+                            
+                            # Check for NaN/Inf
+                            if not (float_val != float_val or float_val == float('inf') or float_val == float('-inf')):
+                                months.append(month_name)
+                                historical.append(float_val)
+                        except (ValueError, TypeError):
+                            continue
             
             # Add predicted data (only months not in historical)
             predicted_months = []
@@ -90,9 +102,21 @@ class ChartDataBuilder:
             for month_name in FISCAL_MONTHS:
                 if month_name in predicted_dict and month_name not in months:
                     value = predicted_dict[month_name]
+                    # Safeguard: ensure value is a pure float, not pandas/numpy object
                     if value is not None:
-                        predicted_months.append(month_name)
-                        predicted_values.append(float(value))  # Ensure pure float
+                        try:
+                            # Convert to pure float, handle all types
+                            if hasattr(value, 'item'):  # numpy scalar
+                                float_val = float(value.item())
+                            else:
+                                float_val = float(value)
+                            
+                            # Check for NaN/Inf
+                            if not (float_val != float_val or float_val == float('inf') or float_val == float('-inf')):
+                                predicted_months.append(month_name)
+                                predicted_values.append(float_val)
+                        except (ValueError, TypeError):
+                            continue
             
             if months or predicted_months:
                 result['products'][product_code] = {
@@ -115,16 +139,38 @@ class ChartDataBuilder:
         for month_name in FISCAL_MONTHS:
             if month_name in overall_historical_dict:
                 value = overall_historical_dict[month_name]
+                # Safeguard: ensure value is a pure float
                 if value is not None:
-                    overall_months.append(month_name)
-                    overall_historical.append(float(value))
+                    try:
+                        if hasattr(value, 'item'):  # numpy scalar
+                            float_val = float(value.item())
+                        else:
+                            float_val = float(value)
+                        
+                        # Check for NaN/Inf
+                        if not (float_val != float_val or float_val == float('inf') or float_val == float('-inf')):
+                            overall_months.append(month_name)
+                            overall_historical.append(float_val)
+                    except (ValueError, TypeError):
+                        continue
         
         # Add overall predicted
         for month_name in FISCAL_MONTHS:
             if month_name in overall_predicted_dict and month_name not in overall_months:
                 value = overall_predicted_dict[month_name]
+                # Safeguard: ensure value is a pure float
                 if value is not None:
-                    overall_predicted.append(float(value))
+                    try:
+                        if hasattr(value, 'item'):  # numpy scalar
+                            float_val = float(value.item())
+                        else:
+                            float_val = float(value)
+                        
+                        # Check for NaN/Inf
+                        if not (float_val != float_val or float_val == float('inf') or float_val == float('-inf')):
+                            overall_predicted.append(float_val)
+                    except (ValueError, TypeError):
+                        continue
         
         result['overall'] = {
             'months': overall_months,
