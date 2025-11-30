@@ -40,6 +40,7 @@ from .strict_excel_extractor import (
     extract_strict_excel_data,
     validate_excel_structure,
 )
+from .comprehensive_extractor import extract_all_sheets_data
 import logging
 
 logger = logging.getLogger(__name__)
@@ -157,40 +158,78 @@ def index(request):
             error_message = f"Error processing file: {str(e)}"
             logger.error("Error processing file: %s", str(e), exc_info=True)
     
-    # Extract chart data from Excel for template
+    # Extract chart data from Excel for template using COMPREHENSIVE extractor
     overall_months = []
     overall_historical = []
     overall_predicted = []
     ingredient_chart_data = {}
     ingredients_json = "[]"  # Default empty array
+    raw_sheets_data = {}
+    all_products_list = []
     
-    if annual_data or ingredient_list:
+    # Use comprehensive extractor to get ALL data from ALL sheets
+    if uploaded_file:
         try:
-            # Extract real data from Excel
-            extracted_data = extract_real_data_from_excel(ingredient_list, annual_data)
+            logger.info(f"Extracting comprehensive data from file: {uploaded_file.file.path}")
+            comprehensive_data = extract_all_sheets_data(uploaded_file.file.path)
             
-            # Format overall data
-            overall_data = extracted_data.get('overall', {})
-            if overall_data:
-                overall_months = overall_data.get('months', [])
-                overall_historical = overall_data.get('historical', [])
-                overall_predicted = overall_data.get('predicted', [])
-            
-            # Format ingredient data
-            ingredients_data = extracted_data.get('ingredients', {})
-            if ingredients_data:
-                for ing_name, ing_data in ingredients_data.items():
-                    if ing_data and isinstance(ing_data, dict):
-                        ingredient_chart_data[ing_name] = {
-                            'months': ing_data.get('months', []),
-                            'historical': ing_data.get('historical', []),
-                            'predicted': ing_data.get('predicted', [])
+            if not comprehensive_data.get('error', False):
+                # Extract overall data
+                overall_data = comprehensive_data.get('overall', {})
+                if overall_data:
+                    overall_months = overall_data.get('months', [])
+                    overall_historical = overall_data.get('historical', [])
+                    overall_predicted = overall_data.get('predicted', [])
+                
+                # Extract ALL products data (not just hardcoded ingredients)
+                products_data = comprehensive_data.get('products', [])
+                raw_sheets_data = comprehensive_data.get('raw_sheets', {})
+                all_products_list = [p['product_code'] for p in products_data]
+                
+                # Build ingredient chart data from ALL products
+                for product in products_data:
+                    product_code = product.get('product_code', '')
+                    if product_code:
+                        ingredient_chart_data[product_code] = {
+                            'months': [h['month'] for h in product.get('historical', [])],
+                            'historical': [h['value'] for h in product.get('historical', [])],
+                            'predicted': [p['value'] for p in product.get('predicted', [])]
                         }
+                
+                # Update ingredients list to include ALL detected products
+                ingredients_json = json.dumps(all_products_list)
+                
+                logger.info(f"Extracted {len(products_data)} products from {len(raw_sheets_data)} sheets")
+            else:
+                logger.error(f"Comprehensive extraction error: {comprehensive_data.get('message', 'Unknown error')}")
+                
         except Exception as e:
-            logger.error("Error extracting chart data: %s", str(e), exc_info=True)
-            # Continue with empty data rather than failing
+            logger.error("Error extracting comprehensive chart data: %s", str(e), exc_info=True)
+            # Fallback to old method if comprehensive extraction fails
+            if annual_data or ingredient_list:
+                try:
+                    extracted_data = extract_real_data_from_excel(ingredient_list, annual_data)
+                    overall_data = extracted_data.get('overall', {})
+                    if overall_data:
+                        overall_months = overall_data.get('months', [])
+                        overall_historical = overall_data.get('historical', [])
+                        overall_predicted = overall_data.get('predicted', [])
+                    
+                    ingredients_data = extracted_data.get('ingredients', {})
+                    if ingredients_data:
+                        for ing_name, ing_data in ingredients_data.items():
+                            if ing_data and isinstance(ing_data, dict):
+                                ingredient_chart_data[ing_name] = {
+                                    'months': ing_data.get('months', []),
+                                    'historical': ing_data.get('historical', []),
+                                    'predicted': ing_data.get('predicted', [])
+                                }
+                        all_products_list = list(ingredients_data.keys())
+                except Exception as e2:
+                    logger.error("Fallback extraction also failed: %s", str(e2), exc_info=True)
     
     # Prepare all chart data as a single JSON object for JavaScript
+    # Include raw_sheets_data for complete dataset
     chart_data_for_template = {
         'overall': {
             'months': overall_months,
@@ -198,7 +237,9 @@ def index(request):
             'predicted': overall_predicted
         },
         'ingredients': ingredient_chart_data,
-        'ingredients_list': [ing for ing, _ in ingredient_list]
+        'ingredients_list': list(ingredient_chart_data.keys()),
+        'raw_sheets': raw_sheets_data,  # Include complete raw data
+        'all_products': all_products_list
     }
     chart_data_json = json.dumps(chart_data_for_template)
     
@@ -853,28 +894,36 @@ def strict_extract_excel(request, file_id):
     """
     STRICT Excel extraction endpoint.
     Returns EXACT values from Excel with NO assumptions.
-    Returns JSON in the format specified by the strict extraction requirements.
+    Uses comprehensive extractor to get ALL data from ALL sheets, ALL products.
     """
     try:
         uploaded_file_obj = UploadedExcelFile.objects.get(id=file_id)
         file_path = uploaded_file_obj.file.path
         
-        # Use strict extractor
-        result = extract_strict_excel_data(file_path)
+        # Use comprehensive extractor to get ALL data
+        result = extract_all_sheets_data(file_path)
         
-        # Return JSON response
+        # Return JSON response with complete dataset
         return JsonResponse(result, json_dumps_params={'ensure_ascii': False})
         
     except UploadedExcelFile.DoesNotExist:
         return JsonResponse({
             'error': True,
             'message': 'File not found',
-            'missing_items': ['file_id']
+            'missing_items': ['file_id'],
+            'raw_sheets': {},
+            'products': [],
+            'overall': {'months': [], 'historical': [], 'predicted': []},
+            'summary': {'total_sheets': 0, 'total_products': 0, 'total_forecast': 0.0, 'total_raw_material': 0.0}
         }, status=404)
     except Exception as exc:
         logger.error("Error in strict_extract_excel: %s", str(exc), exc_info=True)
         return JsonResponse({
             'error': True,
             'message': f'Error processing Excel file: {str(exc)}',
-            'missing_items': []
+            'missing_items': [],
+            'raw_sheets': {},
+            'products': [],
+            'overall': {'months': [], 'historical': [], 'predicted': []},
+            'summary': {'total_sheets': 0, 'total_products': 0, 'total_forecast': 0.0, 'total_raw_material': 0.0}
         }, status=500)
