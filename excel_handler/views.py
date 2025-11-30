@@ -32,9 +32,11 @@ from .excel_extractor import (
     normalize_numeric_value,
     FISCAL_MONTHS,
 )
+from .chart_data_builder import (
+    extract_real_data_from_excel,
+    build_chart_data_from_workflow4,
+)
 import logging
-
-logger = logging.getLogger(__name__)
 
 logger = logging.getLogger(__name__)
 
@@ -149,8 +151,11 @@ def index(request):
         except Exception as e:
             error_message = f"Error processing file: {str(e)}"
     
-    # Convert forecast_data to JSON for template
-    forecast_data_json = json.dumps(forecast_data) if forecast_data else None
+    # Prepare chart data for template
+    overall_months_json = json.dumps(overall_months) if overall_months else None
+    overall_historical_json = json.dumps(overall_historical) if overall_historical else None
+    overall_predicted_json = json.dumps(overall_predicted) if overall_predicted else None
+    ingredient_data_json = json.dumps(ingredient_chart_data) if ingredient_chart_data else None
     
     return render(request, 'excel_handler/index.html', {
         'data': data, 
@@ -159,9 +164,10 @@ def index(request):
         'uploaded_file': uploaded_file,
         'error_message': error_message,
         'warning_message': warning_message,
-        'chart_data_json': chart_data_json,
-        'ingredient_charts_json': ingredient_charts_json,
-        'forecast_data': forecast_data_json,
+        'overall_months': overall_months_json,
+        'overall_historical': overall_historical_json,
+        'overall_predicted': overall_predicted_json,
+        'ingredient_data': ingredient_data_json,
     })
 
 def parse_excel_regions(df):
@@ -451,68 +457,78 @@ def process_all_workflows(request):
         except ValueError:
             download_url = f"{settings.MEDIA_URL}uploads/processed/{final_output_path.name}"
         
-        # Generate chart data from workflow4 results
+        # Get ingredient_list and annual_data from processed data
+        processed_data = ProcessedData.objects.filter(original_file=uploaded_file_obj).first()
+        ingredient_list = []
+        annual_data = []
+        
+        if processed_data:
+            data = processed_data.data
+            annual_data = [{k: v for k, v in row.items() if k != 'region' and k <= 'P'} 
+                          for row in data if row.get('region') in ['annual_data', 'annual_separator']][1:]
+            
+            # Extract ingredient data
+            ingredients = ['mct360', 'mct165', 'mctstick10', 'mctstick30', 'mctstick16', 'mctitto_c']
+            ingredient_list = [(ing, []) for ing in ingredients]
+            for row in data:
+                region = row.get('region', 'unknown')
+                if region.startswith('ingredient_'):
+                    ing = region.split('_', 1)[1]
+                    for item in ingredient_list:
+                        if item[0] == ing:
+                            filtered_row = {k: v for k, v in row.items() if k != 'region' and k <= 'Q'}
+                            item[1].append(filtered_row)
+                            break
+        
+        # Build chart data from workflow4 results
+        chart_data_dict = build_chart_data_from_workflow4(result, ingredient_list, annual_data)
+        
+        # Convert to JSON format for frontend
         products_chart_data = []
         
-        try:
-            # Extract historical data from monthly_trend
-            if not result.monthly_trend.empty:
-                # Group by product
-                for product, group in result.monthly_trend.groupby('product'):
-                    historical = []
-                    # Sort by month
-                    group_sorted = group.sort_values('month')
-                    
+        # Add overall data as first product
+        if chart_data_dict['overall']['months']:
+            products_chart_data.append({
+                'product_code': 'OVERALL',
+                'sheet_name': 'Workflow 4',
+                'historical': [
+                    {'month': month, 'value': val} 
+                    for month, val in zip(chart_data_dict['overall']['months'], chart_data_dict['overall']['historical'])
+                ],
+                'predicted': [
+                    {'month': f"2025-{i+1:02d}", 'value': val} 
+                    for i, val in enumerate(chart_data_dict['overall']['predicted'])
+                ]
+            })
+        
+        # Add ingredient data
+        for ing_name, ing_data in chart_data_dict['ingredients'].items():
+            if ing_data['months']:
+                # Generate predicted months
+                predicted_months = []
+                if ing_data['months']:
+                    last_month_idx = MONTH_NAMES.index(ing_data['months'][-1]) if ing_data['months'][-1] in MONTH_NAMES else 0
                     current_year = datetime.now().year
-                    for _, row in group_sorted.iterrows():
-                        month_name = str(row['month'])
-                        value = float(row['demand'])
-                        
-                        # Convert month name to YYYY-MM format
-                        try:
-                            month_num = MONTH_NAMES.index(month_name) + 1
-                            historical.append({
-                                'month': f"{current_year}-{month_num:02d}",
-                                'value': value
-                            })
-                        except ValueError:
-                            # If month not in MONTH_NAMES, try to parse
-                            logger.warning("Unknown month name: %s", month_name)
-                            continue
                     
-                    # Get predicted value from forecast table
-                    product_forecast = result.forecast_table[
-                        result.forecast_table['Product'] == product
+                    for i in range(6):
+                        next_month_idx = (last_month_idx + i + 1) % 12
+                        month_name = MONTH_NAMES[next_month_idx]
+                        month_num = next_month_idx + 1
+                        year = current_year if next_month_idx >= last_month_idx else current_year + 1
+                        predicted_months.append(f"{year}-{month_num:02d}")
+                
+                products_chart_data.append({
+                    'product_code': ing_name,
+                    'sheet_name': 'Workflow 4',
+                    'historical': [
+                        {'month': month, 'value': val} 
+                        for month, val in zip(ing_data['months'], ing_data['historical'])
+                    ],
+                    'predicted': [
+                        {'month': month, 'value': val} 
+                        for month, val in zip(predicted_months, ing_data['predicted'])
                     ]
-                    
-                    predicted = []
-                    if not product_forecast.empty:
-                        forecast_value = float(product_forecast.iloc[0]['Forecast Demand'])
-                        
-                        # Generate 6 months of predictions
-                        if historical:
-                            last_month = historical[-1]['month']
-                            year, month = map(int, last_month.split('-'))
-                            
-                            for i in range(1, 7):
-                                month += 1
-                                if month > 12:
-                                    month = 1
-                                    year += 1
-                                
-                                predicted.append({
-                                    'month': f"{year}-{month:02d}",
-                                    'value': forecast_value
-                                })
-                    
-                    products_chart_data.append({
-                        'product_code': str(product),
-                        'sheet_name': 'Workflow 4',
-                        'historical': historical,
-                        'predicted': predicted
-                    })
-        except Exception as e:
-            logger.error("Error generating chart data: %s", str(e), exc_info=True)
+                })
         
         return JsonResponse({
             'success': True,

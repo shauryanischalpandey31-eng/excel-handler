@@ -239,12 +239,12 @@
         </div>
         {% endif %}
         
-        <div class="mt-5" id="chartsSection" style="display: none;">
+        <!-- Charts Section - Always present, shown when data available -->
+        <div class="mt-5" id="chartsSection" style="display: {% if overall_months or ingredient_data %}block{% else %}none{% endif %};">
             <h2 class="mb-4">Monthly Trends & Predictions</h2>
             
-        {% if chart_data_json or ingredient_charts_json %}
-            
-            {% if chart_data_json %}
+            <!-- Overall Monthly Forecast Chart -->
+            {% if overall_months %}
             <div class="card mb-4">
                 <div class="card-header bg-primary text-white">
                     <h5 class="mb-0">Overall Monthly Forecast</h5>
@@ -252,42 +252,69 @@
                 <div class="card-body">
                     <canvas id="monthlyForecastChart" height="100"></canvas>
                     <div class="mt-3">
-                        <table class="table table-sm table-bordered">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>Month</th>
-                                    <th>Historical Value</th>
-                                    <th>Predicted Value</th>
-                                </tr>
-                            </thead>
-                            <tbody id="monthlyValuesTableBody">
-                                <!-- Table will be populated by JavaScript -->
-                            </tbody>
-                        </table>
+                        <h6>Monthly Values Table</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-bordered table-striped">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Month</th>
+                                        <th>Historical Value</th>
+                                        <th>Predicted Value</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="monthlyValuesTableBody">
+                                    <!-- Table will be populated by JavaScript -->
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
             {% endif %}
             
-            {% if ingredient_charts_json %}
+            <!-- Ingredient-wise Monthly Trends -->
+            {% if ingredient_data %}
             <div class="card mb-4">
                 <div class="card-header bg-success text-white">
                     <h5 class="mb-0">Ingredient-wise Monthly Trends</h5>
                 </div>
                 <div class="card-body">
-                    <div class="row">
-                        {% for ing_name, ing_chart_json in ingredient_charts_json.items %}
-                        <div class="col-md-6 mb-4">
-                            <h6 class="text-center">{{ ing_name }}</h6>
-                            <canvas id="ingredientChart_{{ ing_name }}" height="150"></canvas>
-                        </div>
-                        {% endfor %}
+                    <div class="row" id="ingredientChartsContainer">
+                        <!-- Ingredient charts will be rendered here by JavaScript -->
                     </div>
                 </div>
             </div>
             {% endif %}
         </div>
-        {% endif %}
+        
+        <!-- Dynamic Charts Section (for data loaded after processing) -->
+        <div id="dynamicChartsSection" style="display: none;">
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Overall Monthly Forecast</h5>
+                </div>
+                <div class="card-body">
+                    <canvas id="dynamicMonthlyForecastChart" height="100"></canvas>
+                    <div class="mt-3">
+                        <h6>Monthly Values Table</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-bordered table-striped">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Month</th>
+                                        <th>Historical Value</th>
+                                        <th>Predicted Value</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="dynamicMonthlyValuesTableBody">
+                                    <!-- Table will be populated by JavaScript -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
@@ -844,14 +871,38 @@
                     
                     // Render charts if chart data is available
                     if (data.chart_data && data.chart_data.products && data.chart_data.products.length > 0) {
-                        // Show dynamic charts section
-                        const dynamicChartsSection = document.getElementById('dynamicChartsSection');
-                        if (dynamicChartsSection) {
-                            dynamicChartsSection.style.display = 'block';
-                            // Scroll to charts
-                            dynamicChartsSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        // Show charts section
+                        const chartsSection = document.getElementById('chartsSection');
+                        if (chartsSection) {
+                            chartsSection.style.display = 'block';
+                            chartsSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                         }
-                        renderChartsFromData(data.chart_data);
+                        
+                        // Extract overall and ingredient data from chart_data
+                        const overallProduct = data.chart_data.products.find(p => p.product_code === 'OVERALL');
+                        const ingredientProducts = data.chart_data.products.filter(p => p.product_code !== 'OVERALL');
+                        
+                        if (overallProduct) {
+                            // Render overall chart
+                            const overallMonths = overallProduct.historical.map(h => h.month);
+                            const overallHistorical = overallProduct.historical.map(h => h.value);
+                            const overallPredicted = overallProduct.predicted.map(p => p.value);
+                            renderOverallChart(overallMonths, overallHistorical, overallPredicted);
+                        }
+                        
+                        // Build ingredient data structure
+                        const ingredientData = {};
+                        ingredientProducts.forEach(product => {
+                            ingredientData[product.product_code] = {
+                                months: product.historical.map(h => h.month),
+                                historical: product.historical.map(h => h.value),
+                                predicted: product.predicted.map(p => p.value)
+                            };
+                        });
+                        
+                        if (Object.keys(ingredientData).length > 0) {
+                            renderIngredientCharts(ingredientData);
+                        }
                     }
                 } else {
                     document.getElementById('processingError').textContent = data.error || 'An error occurred during processing.';
@@ -865,133 +916,27 @@
             });
         }
         
-        // Initialize charts if data is available
-        {% if chart_data_json %}
+        // Initialize charts on page load if data is available
         document.addEventListener('DOMContentLoaded', function() {
-            const chartData = {{ chart_data_json|safe }};
-            const forecastData = {{ forecast_data|safe }};
-            const ctx = document.getElementById('monthlyForecastChartStatic');
+            {% if overall_months %}
+            // Render overall chart
+            const overallMonths = {{ overall_months|safe }};
+            const overallHistorical = {{ overall_historical|safe }};
+            const overallPredicted = {{ overall_predicted|safe }};
             
-            // Populate monthly values table
-            const tableBody = document.getElementById('monthlyValuesTableBody');
-            if (tableBody && forecastData) {
-                forecastData.all_months.forEach((month, index) => {
-                    const row = document.createElement('tr');
-                    const isHistorical = index <= forecastData.prediction_point;
-                    const value = forecastData.all_values[index];
-                    
-                    row.innerHTML = `
-                        <td><strong>${month}</strong></td>
-                        <td>${isHistorical ? value.toFixed(2) : '-'}</td>
-                        <td>${!isHistorical ? '<span class="text-danger fw-bold">' + value.toFixed(2) + '</span>' : '-'}</td>
-                    `;
-                    tableBody.appendChild(row);
-                });
+            if (overallMonths && overallHistorical && overallPredicted) {
+                renderOverallChart(overallMonths, overallHistorical, overallPredicted);
             }
+            {% endif %}
             
-            if (ctx && chartData) {
-                new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels: chartData.labels,
-                        datasets: chartData.datasets
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: true,
-                        plugins: {
-                            title: {
-                                display: true,
-                                text: 'Monthly Trends with Predictions'
-                            },
-                            legend: {
-                                display: true,
-                                position: 'top'
-                            },
-                            tooltip: {
-                                mode: 'index',
-                                intersect: false,
-                                callbacks: {
-                                    label: function(context) {
-                                        let label = context.dataset.label || '';
-                                        if (label) {
-                                            label += ': ';
-                                        }
-                                        if (context.parsed.y !== null && !isNaN(context.parsed.y)) {
-                                            label += context.parsed.y.toLocaleString('en-US', {
-                                                minimumFractionDigits: 2,
-                                                maximumFractionDigits: 2
-                                            });
-                                        } else {
-                                            label += 'N/A';
-                                        }
-                                        return label;
-                                    }
-                                }
-                            }
-                        },
-                        scales: {
-                            y: {
-                                beginAtZero: true,
-                                title: {
-                                    display: true,
-                                    text: 'Value'
-                                }
-                            },
-                            x: {
-                                title: {
-                                    display: true,
-                                    text: 'Month'
-                                }
-                            }
-                        },
-                        interaction: {
-                            mode: 'nearest',
-                            axis: 'x',
-                            intersect: false
-                        }
-                    }
-                });
+            {% if ingredient_data %}
+            // Render ingredient charts
+            const ingredientData = {{ ingredient_data|safe }};
+            if (ingredientData) {
+                renderIngredientCharts(ingredientData);
             }
+            {% endif %}
         });
-        {% endif %}
-        
-        {% if ingredient_charts_json %}
-        document.addEventListener('DOMContentLoaded', function() {
-            {% for ing_name, ing_chart_json in ingredient_charts_json.items %}
-            const ctx_{{ ing_name|slugify }} = document.getElementById('ingredientChart_{{ ing_name }}');
-            if (ctx_{{ ing_name|slugify }}) {
-                const ingChartData_{{ ing_name|slugify }} = {{ ing_chart_json|safe }};
-                new Chart(ctx_{{ ing_name|slugify }}, {
-                    type: 'line',
-                    data: {
-                        labels: ingChartData_{{ ing_name|slugify }}.labels,
-                        datasets: ingChartData_{{ ing_name|slugify }}.datasets
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: true,
-                        plugins: {
-                            legend: {
-                                display: true,
-                                position: 'top'
-                            },
-                            tooltip: {
-                                mode: 'index',
-                                intersect: false
-                            }
-                        },
-                        scales: {
-                            y: {
-                                beginAtZero: true
-                            }
-                        }
-                    }
-                });
-            }
-            {% endfor %}
-        });
-        {% endif %}
     </script>
 </body>
 </html>
