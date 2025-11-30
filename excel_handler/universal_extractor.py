@@ -240,6 +240,15 @@ class UniversalDataExtractor:
         Returns clean dictionary structure with pure float values.
         """
         try:
+            # Check if file exists
+            import os
+            if not os.path.exists(self.file_path):
+                logger.error(f"File does not exist: {self.file_path}")
+                return {
+                    'products': {},
+                    'overall': {'historical': {}, 'predicted': {}}
+                }
+            
             self.excel_file = pd.ExcelFile(self.file_path)
             all_products_data = {}
             overall_monthly_totals = {}

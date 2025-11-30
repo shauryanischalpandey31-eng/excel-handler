@@ -169,48 +169,51 @@ def index(request):
     all_products_list = []
     
     # Use Universal Extractor to get clean data from ALL sheets
+    chart_data_json = json.dumps({
+        'overall': {'months': [], 'historical': [], 'predicted': []},
+        'ingredients': {},
+        'ingredients_list': []
+    })
+    
     if uploaded_file:
         try:
-            logger.info(f"Extracting data using Universal Extractor from: {uploaded_file.file.path}")
-            
-            # Extract data
-            extractor = UniversalDataExtractor(uploaded_file.file.path)
-            extracted_data = extractor.extract()
-            
-            # Build chart data
-            chart_builder = ChartDataBuilder()
-            chart_data = chart_builder.build_chart_data(extracted_data)
-            
-            # Build template context
-            template_context = chart_builder.build_template_context(chart_data)
-            
-            # Extract values for template
-            overall_months = template_context['overall_months']
-            overall_historical = template_context['overall_historical']
-            overall_predicted = template_context['overall_predicted']
-            ingredient_chart_data = template_context['ingredient_chart_data']
-            all_products_list = template_context['ingredients_list']
-            ingredients_json = json.dumps(all_products_list)
-            chart_data_json = template_context['chart_data_json']
-            
-            logger.info(f"Extracted {len(all_products_list)} products: {all_products_list}")
-            logger.info(f"Overall data: {len(overall_months)} months, {len(overall_historical)} historical, {len(overall_predicted)} predicted")
+            file_path = uploaded_file.file.path
+            if file_path and os.path.exists(file_path):
+                logger.info(f"Extracting data using Universal Extractor from: {file_path}")
+                
+                # Extract data
+                extractor = UniversalDataExtractor(file_path)
+                extracted_data = extractor.extract()
+                
+                # Build chart data
+                chart_builder = ChartDataBuilder()
+                chart_data = chart_builder.build_chart_data(extracted_data)
+                
+                # Build template context
+                template_context = chart_builder.build_template_context(chart_data)
+                
+                # Extract values for template
+                overall_months = template_context.get('overall_months', [])
+                overall_historical = template_context.get('overall_historical', [])
+                overall_predicted = template_context.get('overall_predicted', [])
+                ingredient_chart_data = template_context.get('ingredient_chart_data', {})
+                all_products_list = template_context.get('ingredients_list', [])
+                ingredients_json = json.dumps(all_products_list)
+                chart_data_json = template_context.get('chart_data_json', chart_data_json)
+                
+                logger.info(f"Extracted {len(all_products_list)} products: {all_products_list}")
+                logger.info(f"Overall data: {len(overall_months)} months, {len(overall_historical)} historical, {len(overall_predicted)} predicted")
+            else:
+                logger.warning(f"File path does not exist: {file_path if uploaded_file else 'None'}")
                 
         except Exception as e:
             logger.error("Error extracting data with Universal Extractor: %s", str(e), exc_info=True)
-            # Fallback to empty data
+            # Fallback to empty data - don't crash
             chart_data_json = json.dumps({
                 'overall': {'months': [], 'historical': [], 'predicted': []},
                 'ingredients': {},
                 'ingredients_list': []
             })
-    else:
-        # No file uploaded, use empty data
-        chart_data_json = json.dumps({
-            'overall': {'months': [], 'historical': [], 'predicted': []},
-            'ingredients': {},
-            'ingredients_list': []
-        })
     
     return render(request, 'excel_handler/index.html', {
         'data': data, 
