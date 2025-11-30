@@ -6,6 +6,7 @@ Returns pure float values - no nested objects, no numpy types.
 import pandas as pd
 import numpy as np
 import logging
+import os
 from typing import Dict, List, Optional, Any, Tuple
 from collections import OrderedDict
 import re
@@ -241,7 +242,6 @@ class UniversalDataExtractor:
         """
         try:
             # Check if file exists
-            import os
             if not os.path.exists(self.file_path):
                 logger.error(f"File does not exist: {self.file_path}")
                 return {
